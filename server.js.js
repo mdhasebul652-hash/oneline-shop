@@ -91,7 +91,7 @@ function checkAuth(req, res, next) {
 app.use(checkAuth);
 
 // ==========================================
-// ১. লগইন ও রেজিস্ট্রেশন পেজ (ঐচ্ছিক অপশনসহ)
+// ১. লগইন ও রেজিস্ট্রেশন পেজ
 // ==========================================
 app.get('/', (req, res) => {
     if (req.user) {
@@ -104,7 +104,7 @@ app.get('/', (req, res) => {
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>লগইন - দারাজ শপ</title>
+            <title>লগইন - অনলাইন শপ</title>
             <style>
                 body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 90vh; }
                 .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 350px; }
@@ -115,7 +115,7 @@ app.get('/', (req, res) => {
         </head>
         <body>
             <div class="card">
-                <h2 style="text-align:center; color:#f57224;">দারাজ শপ লগইন</h2>
+                <h2 style="text-align:center; color:#f57224;">অনলাইন শপ লগইন</h2>
                 <form action="/api/login" method="POST" autocomplete="off">
                     <input type="email" name="email" placeholder="ইমেইল (ঐচ্ছিক)"><br>
                     <input type="password" name="password" placeholder="পাসওয়ার্ড (ঐচ্ছিক)"><br>
@@ -164,7 +164,7 @@ app.post('/api/login', (req, res) => {
 });
 
 app.get('/api/guest-login', (req, res) => {
-    const guestEmail = "guest_" + Math.random().toString(36.substring(2, 9)) + "@shop.com";
+    const guestEmail = "guest_" + Math.random().toString(36).substring(2, 9) + "@shop.com";
     if (!userProfiles[guestEmail]) userProfiles[guestEmail] = { name: 'Guest User', phone: '', address: '' };
     if (!userCarts[guestEmail]) userCarts[guestEmail] = [];
     if (!userWishlists[guestEmail]) userWishlists[guestEmail] = [];
@@ -293,7 +293,7 @@ app.get('/admin-dashboard', (req, res) => {
         <html>
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>এডমিন ড্যাশবোর্ড - হাসিবুল শপ</title>
+            <title>এডমিন ড্যাশবোর্ড - অনলাইন শপ</title>
             <style>
                 body { font-family: Arial, sans-serif; background:#f4f4f4; margin:0; }
                 .header { background:#343a40; color:white; padding:15px; display:flex; justify-content:space-between; align-items:center; }
@@ -312,7 +312,7 @@ app.get('/admin-dashboard', (req, res) => {
         </head>
         <body>
             <div class="header">
-                <h3 style="margin:0;">এডমিন প্যানেল (হাসিবুল ভাই)</h3>
+                <h3 style="margin:0;">এডমিন প্যানেল (অনলাইন শপ)</h3>
                 <a href="/logout" style="color:white; background:#dc3545; padding:6px 12px; text-decoration:none; border-radius:4px;">লগআউট</a>
             </div>
             <div class="container">
@@ -520,7 +520,7 @@ app.post('/api/toggle-stock', (req, res) => {
 });
 
 // ==========================================
-// ৩. ইউজার ড্যাশবোর্ড (প্রোফাইল আইকন ও পপআপসহ)
+// ৩. ইউজার ড্যাশবোর্ড
 // ==========================================
 app.get('/user-dashboard', (req, res) => {
     if (!req.user || req.user.role !== 'user') return res.redirect('/');
@@ -618,7 +618,7 @@ app.get('/user-dashboard', (req, res) => {
         <html>
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>দারাজ শপ - অনলাইন শপিং</title>
+            <title>অনলাইন শপ</title>
             <style>
                 body { font-family: Arial, sans-serif; margin:0; background:#f4f4f4; padding-bottom: 40px; }
                 .nav { background:#f57224; color:white; padding:12px 15px; display:flex; justify-content:space-between; align-items:center; }
@@ -652,7 +652,7 @@ app.get('/user-dashboard', (req, res) => {
         </head>
         <body>
             <div class="nav">
-                <h3 style="margin:0;">🛒 দারাজ ই-কমার্স শপ</h3>
+                <h3 style="margin:0;">🛒 অনলাইন শপ</h3>
                 <div style="display: flex; gap: 10px; align-items: center;">
                     <button class="profile-icon" onclick="openProfileModal()" title="প্রোফাইল">👤</button>
                     <a href="/logout" style="color:white; background:#333; padding:5px 10px; text-decoration:none; border-radius:4px; font-size:12px;">লগআউট</a>
@@ -679,7 +679,7 @@ app.get('/user-dashboard', (req, res) => {
 
                 <div style="background:linear-gradient(135deg, #f57224, #ff8c42); color:white; padding:15px; border-radius:8px; text-align:center; margin-bottom:12px;">
                     <h3 style="margin:0 0 5px 0;">মেগা ডিসকাউন্ট ও ফ্রি ডেলিভারি!</h3>
-                    <p style="margin:0; font-size:13px;">হাসিবুল শপ থেকে লুফে নিন সেরা অফারগুলো। (কুপন: EID2026)</p>
+                    <p style="margin:0; font-size:13px;">অনলাইন শপ থেকে লুফে নিন সেরা অফারগুলো। (কুপন: EID2026)</p>
                 </div>
 
                 <div class="box">
@@ -837,7 +837,7 @@ app.get('/checkout', (req, res) => {
         <html>
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>চেকআউট - দারাজ</title>
+            <title>চেকআউট - অনলাইন শপ</title>
             <style>
                 body { font-family: Arial, sans-serif; background:#f4f4f4; margin:0; padding:15px; }
                 .card { background:white; padding:15px; border-radius:8px; max-width:450px; margin:auto; }
@@ -875,7 +875,7 @@ app.get('/checkout', (req, res) => {
                         <option value="Nagad">নগদ (Nagad - ${adminPaymentNumbers.nagad})</option>
                     </select><br>
                     <div id="mobile-pay-info" style="display:none; background:#fff3cd; padding:8px; font-size:12px; border-radius:4px; margin-top:5px;">
-                        ওপরের নম্বরে টাকা পাঠিয়ে নিচের ঘরে আপনার প্রেরক নম্বর ও ট্রানজেকশন আইডি দিন।<br>
+                        ওপরের নম্বরে টাকা পাঠিয়ে নিচের ঘরে আপনার প্রেরক নম্বর ও ট্রানজেকশন আইডি দিন。<br>
                         <input type="text" name="senderPhone" placeholder="আপনার বিকাশ/নগদ নম্বর"><br>
                         <input type="text" name="trxId" placeholder="TrxID (লেনদেন আইডি)">
                     </div><br>
