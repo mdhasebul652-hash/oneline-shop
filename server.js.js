@@ -47,9 +47,9 @@ const CATEGORIES = [
 
 let products = [];
 let orders = [];
-let reviews = [];         // লাইভ রিভিউ
-let pendingReviews = [];  // মডারেশনের অপেক্ষায় থাকা রিভিউ
-let broadcastMessages = []; // কাস্টমারদের জন্য ব্রডকাস্ট নোটিফিকেশন
+let reviews = [];         
+let pendingReviews = [];  
+let broadcastMessages = []; 
 let chatMessages = [];
 let userProfiles = {};
 let userPasswords = {}; 
@@ -91,7 +91,7 @@ function checkAuth(req, res, next) {
 app.use(checkAuth);
 
 // ==========================================
-// ১. লগইন ও রেজিস্ট্রেশন পেজ
+// ১. লগইন ও রেজিস্ট্রেশন পেজ (ঐচ্ছিক অপশনসহ)
 // ==========================================
 app.get('/', (req, res) => {
     if (req.user) {
@@ -110,16 +110,19 @@ app.get('/', (req, res) => {
                 .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 350px; }
                 input { width: 92%; padding: 10px; margin: 8px 0; border: 1px solid #ddd; border-radius: 4px; }
                 button { width: 100%; padding: 12px; background: #f57224; color: white; border: none; font-size: 16px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+                .guest-btn { display: block; width: 100%; text-align: center; margin-top: 10px; padding: 10px; background: #6c757d; color: white; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px; box-sizing: border-box; }
             </style>
         </head>
         <body>
             <div class="card">
                 <h2 style="text-align:center; color:#f57224;">দারাজ শপ লগইন</h2>
                 <form action="/api/login" method="POST" autocomplete="off">
-                    <input type="email" name="email" placeholder="ইমেইল (যেমন: user@gmail.com)" required><br>
-                    <input type="password" name="password" placeholder="পাসওয়ার্ড" required><br>
+                    <input type="email" name="email" placeholder="ইমেইল (ঐচ্ছিক)"><br>
+                    <input type="password" name="password" placeholder="পাসওয়ার্ড (ঐচ্ছিক)"><br>
                     <button type="submit">প্রবেশ করুন</button>
                 </form>
+                <div style="text-align: center; margin: 10px 0; color: #777; font-size: 13px;">অথবা</div>
+                <a href="/api/guest-login" class="guest-btn">লগইন ছাড়াই প্রবেশ করুন (Guest)</a>
             </div>
         </body>
         </html>
@@ -127,7 +130,11 @@ app.get('/', (req, res) => {
 });
 
 app.post('/api/login', (req, res) => {
-    const { email, password } = req.body;
+    let { email, password } = req.body;
+
+    if (!email || email.trim() === "") {
+        email = "guest_" + Date.now() + "@shop.com";
+    }
 
     if (email === ADMIN_CREDENTIALS.email) {
         if (password === ADMIN_CREDENTIALS.password) {
@@ -139,10 +146,12 @@ app.post('/api/login', (req, res) => {
         }
     }
 
-    if (!userPasswords[email]) {
-        userPasswords[email] = password; 
-    } else if (userPasswords[email] !== password) {
-        return res.send('<h3 style="color:red; text-align:center;">ভুল পাসওয়ার্ড!</h3><a href="/">ফিরে যান</a>');
+    if (password && password.trim() !== "") {
+        if (!userPasswords[email]) {
+            userPasswords[email] = password; 
+        } else if (userPasswords[email] !== password) {
+            return res.send('<h3 style="color:red; text-align:center;">ভুল পাসওয়ার্ড!</h3><a href="/">ফিরে যান</a>');
+        }
     }
 
     if (!userProfiles[email]) userProfiles[email] = { name: '', phone: '', address: '' };
@@ -154,13 +163,24 @@ app.post('/api/login', (req, res) => {
     return res.redirect('/user-dashboard');
 });
 
+app.get('/api/guest-login', (req, res) => {
+    const guestEmail = "guest_" + Math.random().toString(36.substring(2, 9)) + "@shop.com";
+    if (!userProfiles[guestEmail]) userProfiles[guestEmail] = { name: 'Guest User', phone: '', address: '' };
+    if (!userCarts[guestEmail]) userCarts[guestEmail] = [];
+    if (!userWishlists[guestEmail]) userWishlists[guestEmail] = [];
+
+    const loggedUser = { email: guestEmail, role: 'user' };
+    res.cookie('loggedInUser', JSON.stringify(loggedUser), { maxAge: 30 * 24 * 60 * 60 * 1000 });
+    return res.redirect('/user-dashboard');
+});
+
 app.get('/logout', (req, res) => {
     res.clearCookie('loggedInUser');
     res.redirect('/');
 });
 
 // ==========================================
-// ২. এডমিন ড্যাশবোর্ড (রিভিউ মডারেশন ও ব্রডকাস্ট ফিচার সহ)
+// ২. এডমিন ড্যাশবোর্ড
 // ==========================================
 app.get('/admin-dashboard', (req, res) => {
     if (!req.user || req.user.role !== 'admin') return res.redirect('/');
@@ -194,7 +214,6 @@ app.get('/admin-dashboard', (req, res) => {
         </div>
     `).join('') : '<p style="font-size:12px; color:#777;">কোনো কুপন নেই।</p>';
 
-    // ৪. রিভিউ মডারেশন HTML
     let pendingReviewsHTML = pendingReviews.length > 0 ? pendingReviews.map((r, index) => `
         <div style="background:#f9f9f9; padding:8px; margin-bottom:6px; border-radius:4px; font-size:12px; border-left:3px solid #ffc107;">
             <b>কাস্টমার:</b> ${r.userName} | <b>রেটিং:</b> ${'⭐'.repeat(r.rating)}<br>
@@ -310,7 +329,6 @@ app.get('/admin-dashboard', (req, res) => {
                     <a href="/api/export-sales" style="display:block; background:#17a2b8; color:white; text-align:center; padding:8px; border-radius:4px; text-decoration:none; font-weight:bold; font-size:13px; margin-top:10px;">📥 ডাউনলোড সেলস রিপোর্ট (Excel/CSV)</a>
                 </div>
 
-                <!-- ৩. ব্রডকাস্ট নোটিফিকেশন ম্যানেজার -->
                 <div class="card">
                     <h3 style="margin-top:0; color:#f57224;">📢 কাস্টমার ব্রডকাস্ট নোটিফিকেশন</h3>
                     <form action="/api/send-broadcast" method="POST">
@@ -319,7 +337,6 @@ app.get('/admin-dashboard', (req, res) => {
                     </form>
                 </div>
 
-                <!-- ৪. প্রোডাক্ট রিভিউ মডারেশন প্যানেল -->
                 <div class="card">
                     <h3 style="margin-top:0; color:#f57224;">⭐ প্রোডাক্ট রিভিউ মডারেশন (${pendingReviews.length})</h3>
                     <div>${pendingReviewsHTML}</div>
@@ -398,7 +415,6 @@ app.get('/admin-dashboard', (req, res) => {
     `);
 });
 
-// ব্রডকাস্ট রাউট
 app.post('/api/send-broadcast', (req, res) => {
     if (!req.user || req.user.role !== 'admin') return res.redirect('/');
     const text = req.body.broadcastText;
@@ -408,7 +424,6 @@ app.post('/api/send-broadcast', (req, res) => {
     res.redirect('/admin-dashboard');
 });
 
-// রিভিউ মডারেশন রাউটসমূহ
 app.post('/api/approve-review', (req, res) => {
     if (!req.user || req.user.role !== 'admin') return res.redirect('/');
     const index = parseInt(req.body.index);
@@ -505,7 +520,7 @@ app.post('/api/toggle-stock', (req, res) => {
 });
 
 // ==========================================
-// ৩. ইউজার ড্যাশবোর্ড
+// ৩. ইউজার ড্যাশবোর্ড (প্রোফাইল আইকন ও পপআপসহ)
 // ==========================================
 app.get('/user-dashboard', (req, res) => {
     if (!req.user || req.user.role !== 'user') return res.redirect('/');
@@ -623,30 +638,48 @@ app.get('/user-dashboard', (req, res) => {
                 .price { color:#f57224; font-weight:bold; margin:0; font-size:14px; }
                 .stock-badge { position:absolute; top:5px; left:5px; background:red; color:white; padding:2px 5px; font-size:9px; border-radius:3px; font-weight:bold; }
                 .cart-btn { background:#f57224; color:white; border:none; width:100%; padding:6px; border-radius:4px; font-size:11px; cursor:pointer; font-weight:bold; }
+                
+                /* Profile Modal CSS */
+                .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center; }
+                .modal-content { background: white; padding: 20px; border-radius: 8px; width: 90%; max-width: 350px; position: relative; }
+                .close-btn { position: absolute; right: 15px; top: 10px; font-size: 20px; cursor: pointer; color: #777; }
+                .profile-icon { background: white; color: #f57224; border: none; border-radius: 50%; width: 35px; height: 35px; font-size: 16px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
             </style>
+            <script>
+                function openProfileModal() { document.getElementById('profileModal').style.display = 'flex'; }
+                function closeProfileModal() { document.getElementById('profileModal').style.display = 'none'; }
+            </script>
         </head>
         <body>
             <div class="nav">
                 <h3 style="margin:0;">🛒 দারাজ ই-কমার্স শপ</h3>
-                <a href="/logout" style="color:white; background:#333; padding:5px 10px; text-decoration:none; border-radius:4px; font-size:12px;">লগআউট</a>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button class="profile-icon" onclick="openProfileModal()" title="প্রোফাইল">👤</button>
+                    <a href="/logout" style="color:white; background:#333; padding:5px 10px; text-decoration:none; border-radius:4px; font-size:12px;">লগআউট</a>
+                </div>
             </div>
+
+            <!-- Profile Modal -->
+            <div id="profileModal" class="modal">
+                <div class="modal-content">
+                    <span class="close-btn" onclick="closeProfileModal()">&times;</span>
+                    <h4 style="margin-top:0; color:#f57224; font-size:16px;">👤 আমার প্রোফাইল, ঠিকানা ও পাসওয়ার্ড</h4>
+                    <form action="/api/update-profile" method="POST">
+                        <input type="text" name="name" value="${profile.name || ''}" placeholder="পূর্ণ নাম" style="width:94%; padding:7px; margin:4px 0; border:1px solid #ddd; border-radius:4px; font-size:13px;"><br>
+                        <input type="text" name="phone" value="${profile.phone || ''}" placeholder="মোবাইল নম্বর" style="width:94%; padding:7px; margin:4px 0; border:1px solid #ddd; border-radius:4px; font-size:13px;"><br>
+                        <input type="text" name="address" value="${profile.address || ''}" placeholder="পূর্ণ ডেলিভারি ঠিকানা" style="width:94%; padding:7px; margin:4px 0; border:1px solid #ddd; border-radius:4px; font-size:13px;"><br>
+                        <input type="password" name="newPassword" placeholder="নতুন পাসওয়ার্ড (ঐচ্ছিক)" style="width:94%; padding:7px; margin:4px 0; border:1px solid #ddd; border-radius:4px; font-size:13px;"><br>
+                        <button type="submit" style="background:#28a745; color:white; padding:8px 12px; border:none; border-radius:4px; cursor:pointer; margin-top:8px; font-size:12px; font-weight:bold; width:100%;">প্রোফাইল আপডেট করুন</button>
+                    </form>
+                </div>
+            </div>
+
             <div class="container">
                 ${broadcastHTML}
 
                 <div style="background:linear-gradient(135deg, #f57224, #ff8c42); color:white; padding:15px; border-radius:8px; text-align:center; margin-bottom:12px;">
                     <h3 style="margin:0 0 5px 0;">মেগা ডিসকাউন্ট ও ফ্রি ডেলিভারি!</h3>
                     <p style="margin:0; font-size:13px;">হাসিবুল শপ থেকে লুফে নিন সেরা অফারগুলো। (কুপন: EID2026)</p>
-                </div>
-
-                <div class="box">
-                    <h4 style="margin-top:0; color:#f57224; font-size:15px;">👤 আমার প্রোফাইল, ঠিকানা ও পাসওয়ার্ড</h4>
-                    <form action="/api/update-profile" method="POST">
-                        <input type="text" name="name" value="${profile.name || ''}" placeholder="পূর্ণ নাম" required style="width:94%; padding:7px; margin:3px 0; border:1px solid #ddd; border-radius:4px; font-size:13px;"><br>
-                        <input type="text" name="phone" value="${profile.phone || ''}" placeholder="মোবাইল নম্বর" required style="width:94%; padding:7px; margin:3px 0; border:1px solid #ddd; border-radius:4px; font-size:13px;"><br>
-                        <input type="text" name="address" value="${profile.address || ''}" placeholder="পূর্ণ ডেলিভারি ঠিকানা" required style="width:94%; padding:7px; margin:3px 0; border:1px solid #ddd; border-radius:4px; font-size:13px;"><br>
-                        <input type="password" name="newPassword" placeholder="নতুন পাসওয়ার্ড (ঐচ্ছিক)" style="width:94%; padding:7px; margin:3px 0; border:1px solid #ddd; border-radius:4px; font-size:13px;"><br>
-                        <button type="submit" style="background:#28a745; color:white; padding:7px 12px; border:none; border-radius:4px; cursor:pointer; margin-top:4px; font-size:12px; font-weight:bold;">প্রোফাইল আপডেট করুন</button>
-                    </form>
                 </div>
 
                 <div class="box">
@@ -842,7 +875,7 @@ app.get('/checkout', (req, res) => {
                         <option value="Nagad">নগদ (Nagad - ${adminPaymentNumbers.nagad})</option>
                     </select><br>
                     <div id="mobile-pay-info" style="display:none; background:#fff3cd; padding:8px; font-size:12px; border-radius:4px; margin-top:5px;">
-                        উপরের নম্বরে টাকা পাঠিয়ে নিচের ঘরে আপনার প্রেরক নম্বর ও ট্রানজেকশন আইডি দিন。<br>
+                        ওপরের নম্বরে টাকা পাঠিয়ে নিচের ঘরে আপনার প্রেরক নম্বর ও ট্রানজেকশন আইডি দিন।<br>
                         <input type="text" name="senderPhone" placeholder="আপনার বিকাশ/নগদ নম্বর"><br>
                         <input type="text" name="trxId" placeholder="TrxID (লেনদেন আইডি)">
                     </div><br>
@@ -1011,7 +1044,6 @@ app.post('/api/add-review', (req, res) => {
     const { productId, rating, comment } = req.body;
     const profile = userProfiles[req.user.email] || {};
     
-    // রিভিউ প্রথমে pendingReviews-এ জমা হবে মডারেশনের জন্য
     pendingReviews.push({
         productId,
         userName: profile.name || 'কাস্টমার',
@@ -1037,4 +1069,3 @@ app.post('/api/admin-chat', (req, res) => {
 app.listen(PORT, () => {
     console.log(`Server is running on port http://localhost:${PORT}`);
 });
-
