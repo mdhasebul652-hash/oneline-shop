@@ -621,10 +621,14 @@ app.get('/user-dashboard', (req, res) => {
             <title>অনলাইন শপ</title>
             <style>
                 body { font-family: Arial, sans-serif; margin:0; background:#f4f4f4; padding-bottom: 40px; }
-                .nav { background:#f57224; color:white; padding:12px 15px; display:flex; justify-content:space-between; align-items:center; }
-                .container { padding:10px; max-width:600px; margin:auto; }
+                .nav { background:#f57224; color:white; padding:15px 20px; display:flex; justify-content:space-between; align-items:center; }
+                .nav-title { font-size: 20px; font-weight: bold; margin:0; }
+                .nav-icons { display: flex; gap: 10px; align-items: center; }
+                .top-icon-btn { background: white; color: #f57224; border: none; border-radius: 50%; width: 36px; height: 36px; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-decoration: none; position: relative; }
+                
+                .container { padding:12px; max-width:600px; margin:auto; }
                 .box { background:white; padding:15px; border-radius:8px; margin-bottom:12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-                .search-box { display: flex; gap: 5px; margin-bottom: 8px; }
+                .search-box { display: flex; gap: 5px; margin-top: 5px; }
                 .search-input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
                 .search-btn { background: #f57224; color: white; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; }
                 .category-scroll { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 5px; margin-bottom: 10px; }
@@ -639,30 +643,34 @@ app.get('/user-dashboard', (req, res) => {
                 .stock-badge { position:absolute; top:5px; left:5px; background:red; color:white; padding:2px 5px; font-size:9px; border-radius:3px; font-weight:bold; }
                 .cart-btn { background:#f57224; color:white; border:none; width:100%; padding:6px; border-radius:4px; font-size:11px; cursor:pointer; font-weight:bold; }
                 
-                /* Profile Modal CSS */
+                /* Modal CSS */
                 .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center; }
-                .modal-content { background: white; padding: 20px; border-radius: 8px; width: 90%; max-width: 350px; position: relative; }
+                .modal-content { background: white; padding: 20px; border-radius: 8px; width: 90%; max-width: 350px; position: relative; max-height: 80vh; overflow-y: auto; }
                 .close-btn { position: absolute; right: 15px; top: 10px; font-size: 20px; cursor: pointer; color: #777; }
-                .profile-icon { background: white; color: #f57224; border: none; border-radius: 50%; width: 35px; height: 35px; font-size: 16px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
             </style>
             <script>
-                function openProfileModal() { document.getElementById('profileModal').style.display = 'flex'; }
-                function closeProfileModal() { document.getElementById('profileModal').style.display = 'none'; }
+                function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+                function closeModal(id) { document.getElementById(id).style.display = 'none'; }
             </script>
         </head>
         <body>
+            <!-- বড় করা হেডার সেকশন ও ওপরের আইকনগুলো -->
             <div class="nav">
-                <h3 style="margin:0;">🛒 অনলাইন শপ</h3>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button class="profile-icon" onclick="openProfileModal()" title="প্রোফাইল">👤</button>
-                    <a href="/logout" style="color:white; background:#333; padding:5px 10px; text-decoration:none; border-radius:4px; font-size:12px;">লগআউট</a>
+                <h1 class="nav-title">🛍️ অনলাইন শপ ড্যাশবোর্ড</h1>
+                <div class="nav-icons">
+                    <button class="top-icon-btn" onclick="openModal('trackModal')" title="অর্ডার ট্র্যাক করুন">📦</button>
+                    <button class="top-icon-btn" onclick="openModal('cartModal')" title="শপিং কার্ট">🛒</button>
+                    <button class="top-icon-btn" onclick="openModal('wishlistModal')" title="উইশলিস্ট বা পছন্দ">❤️</button>
+                    <button class="top-icon-btn" onclick="openModal('chatModal')" title="এডমিনের সাথে চ্যাট">💬</button>
+                    <button class="top-icon-btn" onclick="openModal('profileModal')" title="প্রোফাইল">👤</button>
+                    <a href="/logout" class="top-icon-btn" style="background:#333; color:white; font-size:12px;" title="লগআউট">🚪</a>
                 </div>
             </div>
 
             <!-- Profile Modal -->
             <div id="profileModal" class="modal">
                 <div class="modal-content">
-                    <span class="close-btn" onclick="closeProfileModal()">&times;</span>
+                    <span class="close-btn" onclick="closeModal('profileModal')">&times;</span>
                     <h4 style="margin-top:0; color:#f57224; font-size:16px;">👤 আমার প্রোফাইল, ঠিকানা ও পাসওয়ার্ড</h4>
                     <form action="/api/update-profile" method="POST">
                         <input type="text" name="name" value="${profile.name || ''}" placeholder="পূর্ণ নাম" style="width:94%; padding:7px; margin:4px 0; border:1px solid #ddd; border-radius:4px; font-size:13px;"><br>
@@ -674,16 +682,11 @@ app.get('/user-dashboard', (req, res) => {
                 </div>
             </div>
 
-            <div class="container">
-                ${broadcastHTML}
-
-                <div style="background:linear-gradient(135deg, #f57224, #ff8c42); color:white; padding:15px; border-radius:8px; text-align:center; margin-bottom:12px;">
-                    <h3 style="margin:0 0 5px 0;">মেগা ডিসকাউন্ট ও ফ্রি ডেলিভারি!</h3>
-                    <p style="margin:0; font-size:13px;">অনলাইন শপ থেকে লুফে নিন সেরা অফারগুলো। (কুপন: EID2026)</p>
-                </div>
-
-                <div class="box">
-                    <h4 style="margin-top:0; color:#f57224; font-size:15px;">🚚 অর্ডার ট্র্যাকিং করুন</h4>
+            <!-- Track Order Modal -->
+            <div id="trackModal" class="modal">
+                <div class="modal-content">
+                    <span class="close-btn" onclick="closeModal('trackModal')">&times;</span>
+                    <h4 style="margin-top:0; color:#f57224;">🚚 অর্ডার ট্র্যাকিং</h4>
                     <form action="/user-dashboard" method="GET" class="search-box">
                         <input type="text" name="trackId" value="${trackQuery}" placeholder="অর্ডার আইডি দিন (যেমন: DRZ-123456)..." class="search-input" required>
                         <button type="submit" class="search-btn" style="background:#007bff;">ট্র্যাক</button>
@@ -699,7 +702,49 @@ app.get('/user-dashboard', (req, res) => {
                         </div>
                     ` : ''}
                 </div>
+            </div>
 
+            <!-- Cart Modal -->
+            <div id="cartModal" class="modal">
+                <div class="modal-content">
+                    <span class="close-btn" onclick="closeModal('cartModal')">&times;</span>
+                    <h4 style="margin-top:0; color:#f57224;">🛍️ শপিং কার্ট (${cart.length}টি)</h4>
+                    ${cartHTML}
+                    ${cart.length > 0 ? `<a href="/checkout" style="display:block; background:#28a745; color:white; text-align:center; padding:8px; border-radius:4px; text-decoration:none; font-weight:bold; font-size:13px; margin-top:8px;">অর্ডার কনফার্ম করুন (চেকআউট)</a>` : ''}
+                </div>
+            </div>
+
+            <!-- Wishlist Modal -->
+            <div id="wishlistModal" class="modal">
+                <div class="modal-content">
+                    <span class="close-btn" onclick="closeModal('wishlistModal')">&times;</span>
+                    <h4 style="margin-top:0; color:#f57224;">❤️ আমার উইশলিস্ট বা পছন্দ (${wishlist.length}টি)</h4>
+                    ${wishlistHTML}
+                </div>
+            </div>
+
+            <!-- Chat Modal -->
+            <div id="chatModal" class="modal">
+                <div class="modal-content">
+                    <span class="close-btn" onclick="closeModal('chatModal')">&times;</span>
+                    <h4 style="margin-top:0; color:#f57224;">💬 এডমিনের সাথে চ্যাট</h4>
+                    <div style="height:150px; overflow-y:scroll; border:1px solid #eee; padding:5px; margin-bottom:6px; background:#fafafa;">${chatHTML}</div>
+                    <form action="/api/user-chat" method="POST">
+                        <input type="text" name="message" placeholder="আপনার বার্তা লিখুন..." style="width:70%; padding:7px; font-size:12px;" required>
+                        <button type="submit" style="padding:7px 10px; background:#f57224; color:white; border:none; border-radius:4px; font-size:12px;">পাঠান</button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="container">
+                ${broadcastHTML}
+
+                <div style="background:linear-gradient(135deg, #f57224, #ff8c42); color:white; padding:15px; border-radius:8px; text-align:center; margin-bottom:12px;">
+                    <h3 style="margin:0 0 5px 0;">মেগা ডিসকাউন্ট ও ফ্রি ডেলিভারি!</h3>
+                    <p style="margin:0; font-size:13px;">অনলাইন শপ থেকে লুফে নিন সেরা অফারগুলো। (কুপন: EID2026)</p>
+                </div>
+
+                <!-- ড্যাশবোর্ড লেখার ঠিক নিচে সার্চ বার -->
                 <div class="box">
                     <h4 style="margin-top:0; color:#f57224; font-size:15px;">🔍 পণ্য খুঁজুন</h4>
                     <form action="/user-dashboard" method="GET" class="search-box">
@@ -710,17 +755,6 @@ app.get('/user-dashboard', (req, res) => {
                         <p style="font-size:12px; color:#f57224; font-weight:bold;">"${searchQuery}" এর সার্চ রেজাল্ট: (<a href="/user-dashboard">ক্লিয়ার</a>)</p>
                         <div class="product-grid">${renderGrid(searchFiltered) || '<p style="font-size:12px;">কোন পণ্য পাওয়া যায়নি।</p>'}</div>
                     ` : ''}
-                </div>
-
-                <div class="box">
-                    <h4 style="margin-top:0; color:#f57224; font-size:15px;">🛍️ শপিং কার্ট (${cart.length}টি)</h4>
-                    ${cartHTML}
-                    ${cart.length > 0 ? `<a href="/checkout" style="display:block; background:#28a745; color:white; text-align:center; padding:8px; border-radius:4px; text-decoration:none; font-weight:bold; font-size:13px; margin-top:8px;">অর্ডার কনফার্ম করুন (চেকআউট)</a>` : ''}
-                </div>
-
-                <div class="box">
-                    <h4 style="margin-top:0; color:#f57224; font-size:15px;">❤️ আমার উইশলিস্ট বা পছন্দ (${wishlist.length}টি)</h4>
-                    ${wishlistHTML}
                 </div>
 
                 <div class="box">
@@ -735,15 +769,6 @@ app.get('/user-dashboard', (req, res) => {
                 <div class="box">
                     <h4 style="margin-top:0; color:#f57224; font-size:15px;">📜 আমার অর্ডারসমূহ</h4>
                     ${myOrderListHTML}
-                </div>
-
-                <div class="box">
-                    <h4 style="margin-top:0; color:#f57224; font-size:15px;">💬 এডমিনের সাথে চ্যাট করুন</h4>
-                    <div style="height:90px; overflow-y:scroll; border:1px solid #eee; padding:5px; margin-bottom:6px; background:#fafafa;">${chatHTML}</div>
-                    <form action="/api/user-chat" method="POST">
-                        <input type="text" name="message" placeholder="আপনার বার্তা লিখুন..." style="width:74%; padding:7px; font-size:12px;" required>
-                        <button type="submit" style="padding:7px 10px; background:#f57224; color:white; border:none; border-radius:4px; font-size:12px;">পাঠান</button>
-                    </form>
                 </div>
             </div>
         </body>
