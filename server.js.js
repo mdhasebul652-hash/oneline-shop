@@ -22,12 +22,12 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use('/uploads', express.static('uploads'));
 
+// নতুন এডমিন ক্রিক্রেডিশিয়াল
 const ADMIN_CREDENTIALS = {
-    email: "admin@gmail.com",
-    password: "adminpassword123"
+    email: "mdhasibul652@gmail.com",
+    password: "mdhasibul1234"
 };
 
-// এডমিনের পরিবর্তনযোগ্য বিকাশ ও নগদ নম্বর
 let adminPaymentNumbers = {
     bkash: "01700000000",
     nagad: "01800000000"
@@ -84,7 +84,7 @@ function checkAuth(req, res, next) {
 app.use(checkAuth);
 
 // ==========================================
-// ১. লগইন পেজ
+// ১. লগইন পেজ (ইউজার ও এডমিন আলাদা)
 // ==========================================
 app.get('/', (req, res) => {
     if (req.user) {
@@ -97,22 +97,24 @@ app.get('/', (req, res) => {
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>লগইন - দারাজ শপ</title>
+            <title>লগইন - অনলাইন শপ</title>
             <style>
                 body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 90vh; }
-                .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 350px; }
+                .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 350px; text-align: center; }
                 input { width: 92%; padding: 10px; margin: 8px 0; border: 1px solid #ddd; border-radius: 4px; }
                 button { width: 100%; padding: 12px; background: #f57224; color: white; border: none; font-size: 16px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+                .guest-link { display: block; margin-top: 15px; color: #f57224; text-decoration: none; font-weight: bold; font-size: 14px; }
             </style>
         </head>
         <body>
             <div class="card">
-                <h2 style="text-align:center; color:#f57224;">দারাজ শপ লগইন</h2>
+                <h2 style="color:#f57224; margin-top:0;">অনলাইন শপ লগইন</h2>
                 <form action="/api/login" method="POST" autocomplete="off">
                     <input type="email" name="email" placeholder="ইমেইল" required><br>
                     <input type="password" name="password" placeholder="পাসওয়ার্ড" required><br>
                     <button type="submit">প্রবেশ করুন</button>
                 </form>
+                <a href="/user-dashboard" class="guest-link">লগইন ছাড়াই ব্রাউজ করুন →</a>
             </div>
         </body>
         </html>
@@ -197,7 +199,7 @@ app.get('/admin-dashboard', (req, res) => {
         <html>
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>এডমিন ড্যাশবোর্ড</title>
+            <title>এডমিন ড্যাশবোর্ড - অনলাইন শপ</title>
             <style>
                 body { font-family: Arial, sans-serif; background:#f4f4f4; margin:0; }
                 .header { background:#343a40; color:white; padding:15px; display:flex; justify-content:space-between; align-items:center; }
@@ -212,7 +214,7 @@ app.get('/admin-dashboard', (req, res) => {
         </head>
         <body>
             <div class="header">
-                <h3 style="margin:0;">এডমিন প্যানেল</h3>
+                <h3 style="margin:0;">অনলাইন শপ - এডমিন প্যানেল</h3>
                 <a href="/logout" style="color:white; background:#dc3545; padding:6px 12px; text-decoration:none; border-radius:4px;">লগআউট</a>
             </div>
             <div class="container">
@@ -312,14 +314,14 @@ app.post('/api/toggle-stock', (req, res) => {
 });
 
 // ==========================================
-// ৩. ইউজার ড্যাশবোর্ড
+// ৩. ইউজার ড্যাশবোর্ড (লগইন ছাড়াও প্রবেশযোগ্য)
 // ==========================================
 app.get('/user-dashboard', (req, res) => {
-    if (!req.user || req.user.role !== 'user') return res.redirect('/');
-
     const selectedCategory = req.query.category;
     const searchQuery = req.query.search ? req.query.search.trim() : '';
-    const profile = userProfiles[req.user.email] || {};
+    
+    let userEmail = req.user ? req.user.email : null;
+    const profile = userEmail ? (userProfiles[userEmail] || {}) : {};
 
     let categoryFiltered = selectedCategory ? products.filter(p => p.category === selectedCategory) : [];
     let searchFiltered = [];
@@ -350,7 +352,7 @@ app.get('/user-dashboard', (req, res) => {
         <html>
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>দারাজ শপ</title>
+            <title>অনলাইন শপ</title>
             <style>
                 body { font-family: Arial, sans-serif; margin:0; background:#f4f4f4; }
                 .nav { background:#f57224; color:white; padding:12px 15px; display:flex; justify-content:space-between; align-items:center; }
@@ -372,8 +374,15 @@ app.get('/user-dashboard', (req, res) => {
         </head>
         <body>
             <div class="nav">
-                <h3 style="margin:0;">দারাজ ই-কমার্স</h3>
-                <a href="/logout" style="color:white; background:#333; padding:6px 12px; text-decoration:none; border-radius:4px; font-size:13px;">লগআউট</a>
+                <h3 style="margin:0;">অনলাইন শপ</h3>
+                <div>
+                    ${userEmail ? `
+                        <span style="font-size:13px; margin-right:8px;">👤 প্রোফাইল সেট</span>
+                        <a href="/logout" style="color:white; background:#333; padding:6px 12px; text-decoration:none; border-radius:4px; font-size:13px;">লগআউট</a>
+                    ` : `
+                        <a href="/" style="color:white; background:#333; padding:6px 12px; text-decoration:none; border-radius:4px; font-size:13px;">লগইন / এডমিন</a>
+                    `}
+                </div>
             </div>
             <div class="container">
                 <div class="box">
@@ -421,22 +430,21 @@ app.get('/user-dashboard', (req, res) => {
 });
 
 app.post('/api/update-profile', (req, res) => {
-    if (!req.user) return res.redirect('/');
     const { name, phone, address } = req.body;
-    userProfiles[req.user.email] = { name, phone, address };
+    let userEmail = req.user ? req.user.email : ('guest_' + phone);
+    userProfiles[userEmail] = { name, phone, address };
     res.redirect('/user-dashboard');
 });
 
 // ==========================================
-// ৪. একক পণ্য পেজ (অটোমেটিক প্রোফাইল ডাটা লোড সহ অর্ডার ফর্ম)
+// ৪. একক পণ্য পেজ (নাম ও ঠিকানা দিয়ে অর্ডার এবং প্রোডাক্ট চ্যাট)
 // ==========================================
 app.get('/product/:id', (req, res) => {
-    if (!req.user) return res.redirect('/');
-
     const product = products.find(p => p.id === req.params.id);
     if (!product) return res.send('পণ্য পাওয়া যায়নি!');
 
-    const userProfile = userProfiles[req.user.email] || {};
+    let userEmail = req.user ? req.user.email : null;
+    const userProfile = userEmail ? (userProfiles[userEmail] || {}) : {};
 
     let subImagesHTML = product.subImages.map(img => `<img src="${img}" style="width:60px; height:60px; object-fit:cover; margin-right:5px; border:1px solid #ccc; border-radius:4px;">`).join('');
     let productReviews = reviews.filter(r => r.productId === product.id);
@@ -547,10 +555,10 @@ app.get('/product/:id', (req, res) => {
             </div>
 
             <div class="box">
-                <h4>এডমিনের সাথে চ্যাট করুন</h4>
+                <h4>এই পণ্য নিয়ে এডমিনের সাথে চ্যাট করুন</h4>
                 <div style="height:100px; overflow-y:scroll; border:1px solid #ccc; padding:8px; margin-bottom:8px;">${chatHTML}</div>
                 <form action="/api/send-chat" method="POST">
-                    <input type="text" name="message" placeholder="পণ্য নিয়ে কিছু লিখুন..." required>
+                    <input type="text" name="message" placeholder="পণ্য নিয়ে কিছু জিজ্ঞেস করুন..." required>
                     <button type="submit" style="padding:8px 12px; background:#f57224; color:white; border:none; border-radius:4px;">পাঠান</button>
                 </form>
             </div>
@@ -560,15 +568,14 @@ app.get('/product/:id', (req, res) => {
 });
 
 app.post('/api/place-order', (req, res) => {
-    if (!req.user) return res.redirect('/');
     const { productId, productName, price, customerName, customerPhone, customerAddress, paymentMethod, senderPhone, trxId } = req.body;
 
     if (paymentMethod !== 'Cash on Delivery' && !senderPhone) {
         return res.send('<h3 style="color:red; text-align:center;">বিকাশ বা নগদে পেমেন্ট করলে আপনার প্রেরক মোবাইল নম্বর দেওয়া বাধ্যতামূলক!</h3><a href="javascript:history.back()">ফিরে যান</a>');
     }
 
-    // ইউজারের প্রোফাইল আপডেট করে রাখা হচ্ছে যাতে ভবিষ্যতে অটো ফিল হয়
-    userProfiles[req.user.email] = {
+    let userEmail = req.user ? req.user.email : ('guest_' + customerPhone);
+    userProfiles[userEmail] = {
         name: customerName,
         phone: customerPhone,
         address: customerAddress
@@ -576,7 +583,7 @@ app.post('/api/place-order', (req, res) => {
 
     orders.push({
         orderId: Date.now(),
-        user: req.user.email,
+        user: userEmail,
         customerName,
         customerPhone,
         customerAddress,
@@ -601,15 +608,15 @@ app.post('/api/place-order', (req, res) => {
 });
 
 app.post('/api/add-review', (req, res) => {
-    if (!req.user) return res.redirect('/');
     const { productId, rating, comment } = req.body;
-    reviews.push({ productId, user: req.user.email, rating, comment });
+    let userName = req.user ? req.user.email : 'Guest User';
+    reviews.push({ productId, user: userName, rating, comment });
     res.redirect('/product/' + productId);
 });
 
 app.post('/api/send-chat', (req, res) => {
-    if (!req.user) return res.redirect('/');
-    chatMessages.push({ sender: req.user.email, text: req.body.message });
+    let senderName = req.user ? req.user.email : 'Guest User';
+    chatMessages.push({ sender: senderName, text: req.body.message });
     res.redirect('back');
 });
 
