@@ -2,6 +2,7 @@
   "dependencies": {
     "bcrypt": "^6.0.0",
     "connect-mongo": "^6.0.0",
+    "cooki": "^0.2.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
     "egs": "^0.3.1",
