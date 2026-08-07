@@ -1,4 +1,4 @@
-const express = require('express');
+Const express = require('express');
 const mongoose = require('mongoose');
 const cookieParser = require('cookie-parser');
 const multer = require('multer');
@@ -61,13 +61,31 @@ const productSchema = new mongoose.Schema({
 });
 const Product = mongoose.model('Product', productSchema);
 
+const reviewSchema = new mongoose.Schema({
+    productId: { type: String, required: true },
+    userEmail: { type: String, required: true },
+    rating: { type: Number, required: true }, 
+    comment: { type: String, default: '' },
+    createdAt: { type: Date, default: Date.now }
+});
+const Review = mongoose.model('Review', reviewSchema);
+
+const couponSchema = new mongoose.Schema({
+    code: { type: String, required: true, unique: true },
+    discountAmount: { type: Number, required: true }, 
+    createdAt: { type: Date, default: Date.now }
+});
+const Coupon = mongoose.model('Coupon', couponSchema);
+
 const orderSchema = new mongoose.Schema({
     userEmail: String,
     items: Array,
     productPrice: Number,
     deliveryCharge: Number,
+    discountPrice: { type: Number, default: 0 }, 
     totalAmount: Number,
     deliveryArea: String,
+    customerNote: { type: String, default: '' },
     paymentMethod: String,
     senderNumber: String,
     paidAmount: Number,
@@ -167,11 +185,15 @@ const getNavbarHTML = (user) => `
     </header>
     <div class="categories-nav">
         <a href="/">🔥 All</a>
-        <a href="/category/Fashion">👗 Fashion</a>
-        <a href="/category/Electronics">💻 Electronics</a>
-        <a href="/category/Groceries">🍎 Groceries</a>
-        <a href="/category/Home">🏠 Home & Living</a>
-        <a href="/category/Beauty">💄 Beauty & Health</a>
+        <a href="/category/Fashion">👗 ফ্যাশন</a>
+        <a href="/category/Supershop">🛒 সুপার শপ</a>
+        <a href="/category/Pharmacy">💊 ফার্মেসি</a>
+        <a href="/category/Food">🍲 খাদ্যপণ্য</a>
+        <a href="/category/Sports">⚽ স্পোর্টস</a>
+        <a href="/category/Books">📚 বই</a>
+        <a href="/category/Stationery">✏️ স্টেশনারি</a>
+        <a href="/category/HomeDecor">🛋️ হোম ডেকোর ও ফার্নিচার</a>
+        <a href="/category/BeautyCare">💄 বিউটি পার্লার কেয়ার</a>
     </div>
 
     <div class="bottom-nav">
@@ -205,7 +227,7 @@ app.get('/', async (req, res) => {
         <div style="background:white; padding:15px; margin-bottom:15px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
             <p style="font-weight:bold; margin-bottom:8px;">${fb.title}</p>
             ${fb.mediaType === 'image' ? `<img src="/uploads/${fb.mediaUrl}" style="max-width:100%; height:auto; border-radius:4px;">` : `<video src="/uploads/${fb.mediaUrl}" controls style="max-width:100%; border-radius:4px;"></video>`}
-            <br><a href="${fb.productLink || '/'}" class="btn btn-buy" style="margin-top:10px; display:inline-block;">⚡ Order Now</a>
+            <br><a href="${fb.productLink || '/'}" class="btn btn-buy" style="margin-top:10px; display:inline-block;">⚡ Order Now (Buy Direct)</a>
         </div>
     `).join('');
 
@@ -246,7 +268,7 @@ app.get('/category/:name', async (req, res) => {
             ${getNavbarHTML(req.user)}
             <div class="container">
                 <h3 style="margin: 10px 0 15px 0;">Category: ${catName}</h3>
-                <div class="product-grid">${productsHTML.length ? productsHTML : '<div style="background:white; padding:30px; text-align:center; border-radius:6px; grid-column: span 2;"><h3>No products found.</h3><p style="color:#777; font-size:13px;">This category currently has no products available.</p></div>'}</div>
+                <div class="product-grid">${productsHTML.length ? productsHTML : '<div style="background:white; padding:30px; text-align:center; border-radius:6px; grid-column: span 2;"><h3>No products found.</h3></div>'}</div>
             </div>
         </body>
         </html>
@@ -292,11 +314,19 @@ app.get('/product/:id', async (req, res) => {
     let product = await Product.findById(req.params.id);
     if (!product) return res.send('Product not found');
     let chats = await Chat.find({ productId: product._id });
+    let reviews = await Review.find({ productId: product._id }).sort({ _id: -1 });
     let relatedProducts = await Product.find({ category: product.category, _id: { $ne: product._id } }).limit(4);
 
     let galleryHTML = product.gallery.map(img => `<img src="/uploads/${img}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ccc;">`).join('');
     let chatsHTML = chats.map(c => `<div style="border-bottom:1px solid #eee; padding:8px 0;"><p style="margin:0 0 4px 0;"><b>${c.userEmail}:</b> ${c.message}</p><p style="color:green; font-size:13px; margin:0 0 0 15px;"><b>Admin Reply:</b> ${c.reply || 'Pending reply'}</p></div>`).join('');
     
+    let reviewsHTML = reviews.map(r => `
+        <div style="border-bottom:1px solid #eee; padding:8px 0; font-size:13px;">
+            <p style="margin:0 0 2px 0;"><b>${r.userEmail}</b> - <span style="color:#ff9800; font-weight:bold;">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span></p>
+            <p style="margin:0; color:#444;">${r.comment}</p>
+        </div>
+    `).join('');
+
     let relatedHTML = relatedProducts.map(p => `
         <a href="/product/${p._id}" class="product-card">
             <img src="/uploads/${p.mainImage}" alt="${p.name}">
@@ -329,6 +359,24 @@ app.get('/product/:id', async (req, res) => {
                 </div>
                 
                 <hr style="margin:30px 0; border:0; border-top:1px solid #eee;">
+                
+                <h3>Ratings & Reviews</h3>
+                <form action="/api/add-review" method="POST" style="background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:15px;">
+                    <input type="hidden" name="productId" value="${product._id}">
+                    <label style="font-size:13px; font-weight:600;">Rate this product:</label>
+                    <select name="rating" style="padding:5px; margin-bottom:8px; border-radius:4px; border:1px solid #ccc;" required>
+                        <option value="5">★★★★★ (5 Stars)</option>
+                        <option value="4">★★★★☆ (4 Stars)</option>
+                        <option value="3">★★★☆☆ (3 Stars)</option>
+                        <option value="2">★★☆☆☆ (2 Stars)</option>
+                        <option value="1">★☆☆☆☆ (1 Star)</option>
+                    </select><br>
+                    <textarea name="comment" placeholder="Write your review here..." style="width:100%; height:50px; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required></textarea>
+                    <button type="submit" class="btn" style="padding:6px 12px; font-size:12px; margin-top:5px;">Submit Review</button>
+                </form>
+                <div>${reviewsHTML.length ? reviewsHTML : '<p style="color:#777; font-size:13px;">No reviews yet.</p>'}</div>
+
+                <hr style="margin:30px 0; border:0; border-top:1px solid #eee;">
                 <h3>You May Also Like</h3>
                 <div class="product-grid" style="margin-top:10px;">${relatedHTML.length ? relatedHTML : '<p>No related products.</p>'}</div>
 
@@ -350,6 +398,22 @@ app.get('/product/:id', async (req, res) => {
     `);
 });
 
+app.post('/api/add-review', async (req, res, next) => {
+    try {
+        if (!req.user) return res.redirect('/login');
+        const { productId, rating, comment } = req.body;
+        await new Review({
+            productId,
+            userEmail: req.user.email,
+            rating: Number(rating),
+            comment
+        }).save();
+        res.redirect('back');
+    } catch (err) {
+        next(err);
+    }
+});
+
 app.post('/api/chat', async (req, res) => {
     let email = req.user ? req.user.email : 'Guest User';
     await new Chat({
@@ -361,7 +425,7 @@ app.post('/api/chat', async (req, res) => {
     res.redirect('back');
 });
 
-// ================= My Orders Page (With Status Tracking & Cancel Option) =================
+// ================= My Orders Page =================
 
 app.get('/my-orders', async (req, res) => {
     if (!req.user) return res.redirect('/login?redirect=/my-orders');
@@ -392,7 +456,8 @@ app.get('/my-orders', async (req, res) => {
             <div style="background:#fff; padding:15px; margin-bottom:12px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-size:14px;">
                 <p style="margin:5px 0;"><b>Order ID:</b> ${o._id}</p>
                 <p style="margin:5px 0;"><b>Items:</b> ${itemsList}</p>
-                <p style="margin:5px 0;"><b>Price:</b> ৳${o.productPrice || (o.totalAmount - (o.deliveryCharge || 0))} + Delivery: ৳${o.deliveryCharge || 0} (${o.deliveryArea || 'N/A'}) = <b style="color:#f85606;">৳${o.totalAmount}</b> (${o.paymentMethod})</p>
+                <p style="margin:5px 0;"><b>Price:</b> ৳${o.productPrice || (o.totalAmount - (o.deliveryCharge || 0))} + Delivery: ৳${o.deliveryCharge || 0} ${o.discountPrice ? `- Discount: ৳${o.discountPrice}` : ''} = <b style="color:#f85606;">৳${o.totalAmount}</b> (${o.paymentMethod})</p>
+                ${o.customerNote ? `<p style="margin:5px 0; color:#555; font-size:13px;"><b>Note:</b> ${o.customerNote}</p>` : ''}
                 <p style="margin:5px 0;"><b>Status Update:</b> <span style="color:${statusColor}; font-weight:bold;">${statusText}</span></p>
                 <p style="margin:5px 0; color:#666; font-size:12px;"><b>Date:</b> ${new Date(o.createdAt).toLocaleString()}</p>
                 ${cancelBtn}
@@ -434,7 +499,7 @@ app.get('/api/cancel-order/:id', async (req, res, next) => {
     }
 });
 
-// ================= Checkout & Order Flow (Distance & Zone Based Delivery Charge) =================
+// ================= Checkout & Order Flow =================
 
 app.get('/buy-now/:id', async (req, res) => {
     let product = await Product.findById(req.params.id);
@@ -467,6 +532,7 @@ app.get('/buy-now/:id', async (req, res) => {
                     <input type="hidden" name="productId" value="${product._id}">
                     <input type="hidden" name="productName" value="${product.name}">
                     <input type="hidden" name="price" value="${product.price}">
+                    <input type="hidden" name="discountPrice" id="discountPriceInput" value="0">
                     
                     <label style="font-size:13px; font-weight:600;">Full Name:</label><br>
                     <input type="text" name="name" value="${req.user.name || ''}" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
@@ -484,9 +550,20 @@ app.get('/buy-now/:id', async (req, res) => {
                     <label style="font-size:13px; font-weight:600;">Delivery Address:</label><br>
                     <textarea name="address" style="width:100%; height:60px; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>${req.user.address || ''}</textarea><br>
 
+                    <label style="font-size:13px; font-weight:600;">Coupon Code (যদি থাকে):</label><br>
+                    <div style="display:flex; gap:5px; margin:4px 0 10px 0;">
+                        <input type="text" name="couponCode" id="couponCodeInput" placeholder="Enter Coupon Code" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
+                        <button type="button" onclick="applyCoupon()" class="btn" style="padding:8px 12px; font-size:12px;">Apply</button>
+                    </div>
+                    <p id="couponMsg" style="font-size:12px; margin:0 0 10px 0; color:green;"></p>
+
+                    <label style="font-size:13px; font-weight:600;">Customer Note / Instructions (ঐচ্ছিক):</label><br>
+                    <input type="text" name="customerNote" placeholder="যেমন: বিকালে কল করবেন" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;"><br>
+
                     <div style="background:#f0f8ff; padding:12px; border-radius:4px; margin-bottom:12px; font-size:14px; border:1px solid #bce8f1;">
                         <p style="margin:2px 0;">Product Price: ৳${product.price}</p>
                         <p style="margin:2px 0;">Delivery Charge: ৳<span id="deliveryChargeText">60</span></p>
+                        <p style="margin:2px 0; color:red;" id="discountRow" style="display:none;">Discount: -৳<span id="discountText">0</span></p>
                         <hr style="border:0; border-top:1px solid #ccc; margin:6px 0;">
                         <p style="margin:2px 0; font-weight:bold; color:#f85606; font-size:16px;">Total Payable Amount: ৳<span id="totalAmountText">${product.price + 60}</span></p>
                     </div>
@@ -500,8 +577,6 @@ app.get('/buy-now/:id', async (req, res) => {
 
                     <div id="onlinePaymentDiv" style="display:${req.user.isBlocked ? 'block' : 'none'}; background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:10px; border:1px dashed #f85606;">
                         <p style="font-size:13px; color:#333; margin:0 0 6px 0;">আমাদের মার্চেন্ট/পার্সোনাল নাম্বারে টাকা পাঠান: <b style="color:#f85606; font-size:15px;">01700000000</b></p>
-                        <p style="font-size:11px; color:#666; margin:0 0 10px 0;">ডেলিভারি চার্জসহ মোট টাকা পাঠিয়ে আপনার মোবাইল নাম্বার ও টাকার পরিমাণ নিচে দিন এবং 'Order Now' চাপুন।</p>
-                        
                         <label style="font-size:12px; font-weight:600;">আপনার বিকাশ/নগদ একাউন্ট নাম্বার <span style="color:red;">*</span>:</label><br>
                         <input type="text" name="senderNumber" id="senderNumber" placeholder="যেমন: 01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
                         
@@ -516,20 +591,47 @@ app.get('/buy-now/:id', async (req, res) => {
                 </form>
             </div>
             <script>
+                let appliedDiscount = 0;
+
+                async function applyCoupon() {
+                    let code = document.getElementById('couponCodeInput').value;
+                    let msg = document.getElementById('couponMsg');
+                    if(!code) return;
+
+                    try {
+                        let res = await fetch('/api/verify-coupon', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({code})
+                        });
+                        let data = await res.json();
+                        if(data.success) {
+                            appliedDiscount = data.discountAmount;
+                            document.getElementById('discountPriceInput').value = appliedDiscount;
+                            document.getElementById('discountText').innerText = appliedDiscount;
+                            msg.style.color = 'green';
+                            msg.innerText = 'Coupon applied successfully! Discount: ৳' + appliedDiscount;
+                            calculateTotal();
+                        } else {
+                            msg.style.color = 'red';
+                            msg.innerText = data.message;
+                        }
+                    } catch(e) {
+                        msg.style.color = 'red';
+                        msg.innerText = 'Invalid coupon request.';
+                    }
+                }
+
                 function calculateTotal() {
                     let productPrice = Number(document.getElementById('productPrice').innerText);
                     let area = document.getElementById('deliveryArea').value;
                     let deliveryCharge = 60;
 
-                    if (area === 'Inside Dhaka') {
-                        deliveryCharge = 120;
-                    } else if (area === 'Outside Dhaka') {
-                        deliveryCharge = 150;
-                    } else {
-                        deliveryCharge = 60; // Local / Same City
-                    }
+                    if (area === 'Inside Dhaka') deliveryCharge = 120;
+                    else if (area === 'Outside Dhaka') deliveryCharge = 150;
 
-                    let total = productPrice + deliveryCharge;
+                    let total = (productPrice + deliveryCharge) - appliedDiscount;
+                    if(total < 0) total = 0;
 
                     document.getElementById('deliveryChargeText').innerText = deliveryCharge;
                     document.getElementById('totalAmountText').innerText = total;
@@ -557,9 +659,19 @@ app.get('/buy-now/:id', async (req, res) => {
     `);
 });
 
+app.post('/api/verify-coupon', async (req, res) => {
+    let { code } = req.body;
+    let coupon = await Coupon.findOne({ code: code.trim() });
+    if(coupon) {
+        res.json({ success: true, discountAmount: coupon.discountAmount });
+    } else {
+        res.json({ success: false, message: 'Invalid or expired coupon code.' });
+    }
+});
+
 app.post('/api/place-order', async (req, res) => {
     if (!req.user) return res.redirect('/login');
-    const { productId, productName, price, name, phone, address, deliveryArea, paymentMethod, senderNumber, paidAmount, trxId } = req.body;
+    const { productId, productName, price, name, phone, address, deliveryArea, discountPrice, customerNote, paymentMethod, senderNumber, paidAmount, trxId } = req.body;
 
     if (req.user.isBlocked && paymentMethod === 'COD') {
         return res.send(`<script>alert('COD is disabled for your account. Please pay via bKash or Nagad.'); window.history.back();</script>`);
@@ -574,7 +686,8 @@ app.post('/api/place-order', async (req, res) => {
     else if (deliveryArea === 'Outside Dhaka') deliveryCharge = 150;
 
     let productPrice = Number(price);
-    let totalAmount = productPrice + deliveryCharge;
+    let discount = Number(discountPrice) || 0;
+    let totalAmount = (productPrice + deliveryCharge) - discount;
 
     await User.findByIdAndUpdate(req.user._id, { name, phone, address });
     await Product.findByIdAndUpdate(productId, { $inc: { stock: -1, soldCount: 1 } });
@@ -584,8 +697,10 @@ app.post('/api/place-order', async (req, res) => {
         items: [{ productId, productName, price: productPrice }],
         productPrice,
         deliveryCharge,
+        discountPrice: discount,
         totalAmount,
         deliveryArea,
+        customerNote: customerNote || '',
         paymentMethod,
         senderNumber: senderNumber || '',
         paidAmount: Number(paidAmount) || 0,
@@ -594,7 +709,7 @@ app.post('/api/place-order', async (req, res) => {
         previousStatus: 'Pending'
     }).save();
 
-    res.send(`<script>alert('Order placed successfully with Distance-Based Delivery Charge!'); window.location.href='/my-orders';</script>`);
+    res.send(`<script>alert('Order placed successfully!'); window.location.href='/my-orders';</script>`);
 });
 
 // ================= User Authentication & Dashboard =================
@@ -746,6 +861,7 @@ app.get('/admin-dashboard', async (req, res) => {
     let products = await Product.find().sort({ _id: -1 });
     let chats = await Chat.find().sort({ _id: -1 });
     let users = await User.find({ role: 'user' });
+    let coupons = await Coupon.find().sort({ _id: -1 });
 
     let pendingCount = await Order.countDocuments({ status: 'Pending' });
     let confirmedCount = await Order.countDocuments({ status: 'Confirmed' });
@@ -760,9 +876,11 @@ app.get('/admin-dashboard', async (req, res) => {
     if (activeTab === 'trash') queryStatus = 'Trash';
 
     let orders = await Order.find({ status: queryStatus }).sort({ _id: -1 });
+    let allDeliveredOrders = await Order.find({ status: 'Delivered' });
 
     let lowStockCount = products.filter(p => p.stock < 5).length;
     let totalSoldItems = products.reduce((acc, p) => acc + (p.soldCount || 0), 0);
+    let totalRevenue = allDeliveredOrders.reduce((acc, o) => acc + (o.totalAmount || 0), 0);
 
     let productsHTML = products.map(p => `
         <tr style="${p.stock < 5 ? 'background:#fff3cd;' : ''}">
@@ -778,20 +896,22 @@ app.get('/admin-dashboard', async (req, res) => {
         </tr>
     `).join('');
 
+    let couponsHTML = coupons.map(c => `
+        <tr>
+            <td><b>${c.code}</b></td>
+            <td>৳${c.discountAmount}</td>
+            <td><a href="/api/delete-coupon/${c._id}" class="btn" style="background:#d9534f; padding:3px 6px; font-size:11px;" onclick="return confirm('Delete this coupon?');">Delete</a></td>
+        </tr>
+    `).join('');
+
     let ordersHTML = orders.map(o => {
         let actionButtons = '';
         if (o.status === 'Pending') {
-            actionButtons = `
-                <a href="/api/change-order-status/${o._id}/Confirmed?tab=${activeTab}" class="btn btn-buy" style="padding:4px 8px; font-size:11px; margin-right:4px;">Confirm Order</a>
-            `;
+            actionButtons = `<a href="/api/change-order-status/${o._id}/Confirmed?tab=${activeTab}" class="btn btn-buy" style="padding:4px 8px; font-size:11px; margin-right:4px;">Confirm Order</a>`;
         } else if (o.status === 'Confirmed') {
-            actionButtons = `
-                <a href="/api/change-order-status/${o._id}/Delivered?tab=${activeTab}" class="btn" style="background:#28a745; padding:4px 8px; font-size:11px; margin-right:4px;">Completed (Delivered)</a>
-            `;
+            actionButtons = `<a href="/api/change-order-status/${o._id}/Delivered?tab=${activeTab}" class="btn" style="background:#28a745; padding:4px 8px; font-size:11px; margin-right:4px;">Completed (Delivered)</a>`;
         } else if (o.status === 'Trash') {
-            actionButtons = `
-                <a href="/api/restore-order/${o._id}" class="btn" style="background:#17a2b8; padding:4px 8px; font-size:11px; margin-right:4px;">🔄 Restore</a>
-            `;
+            actionButtons = `<a href="/api/restore-order/${o._id}" class="btn" style="background:#17a2b8; padding:4px 8px; font-size:11px; margin-right:4px;">🔄 Restore</a>`;
         }
 
         let deleteBtnLink = o.status === 'Trash' ? `/api/permanent-delete-order/${o._id}` : `/api/move-to-trash/${o._id}`;
@@ -799,11 +919,12 @@ app.get('/admin-dashboard', async (req, res) => {
 
         return `
             <tr>
-                <td>${o._id}</td>
+                <td>${o._id} <br><a href="/admin/invoice/${o._id}" target="_blank" style="font-size:11px; color:#007bff;">🖨️ Invoice</a></td>
                 <td>${o.userEmail}</td>
                 <td>
                     <b>Area:</b> ${o.deliveryArea || 'N/A'} <br>
-                    <b>Price:</b> ৳${o.productPrice || (o.totalAmount - (o.deliveryCharge || 0))} + Delivery: ৳${o.deliveryCharge || 0} = <b>৳${o.totalAmount}</b> (${o.paymentMethod})<br>
+                    <b>Price:</b> ৳${o.productPrice || (o.totalAmount - (o.deliveryCharge || 0))} + Delivery: ৳${o.deliveryCharge || 0} ${o.discountPrice ? `- Discount: ৳${o.discountPrice}` : ''} = <b>৳${o.totalAmount}</b> (${o.paymentMethod})<br>
+                    ${o.customerNote ? `<span style="color:#d9534f; font-size:12px;"><b>Note:</b> ${o.customerNote}</span><br>` : ''}
                     <small>Sender: ${o.senderNumber || 'N/A'}, Paid: ৳${o.paidAmount || 0}, TrxID: ${o.trxId || 'N/A'}</small>
                 </td>
                 <td>
@@ -854,8 +975,27 @@ app.get('/admin-dashboard', async (req, res) => {
                         <p style="font-size:20px; color:#f85606; font-weight:bold; margin:5px 0 0 0;">${totalSoldItems}</p>
                     </div>
                     <div style="background:white; padding:12px; border-radius:6px; flex:1; min-width:140px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                        <h4 style="margin:0; font-size:13px; color:#666;">Total Revenue (Delivered)</h4>
+                        <p style="font-size:20px; color:#28a745; font-weight:bold; margin:5px 0 0 0;">৳${totalRevenue}</p>
+                    </div>
+                    <div style="background:white; padding:12px; border-radius:6px; flex:1; min-width:140px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
                         <h4 style="margin:0; font-size:13px; color:#666;">Low Stock Alerts</h4>
                         <p style="font-size:20px; color:red; font-weight:bold; margin:5px 0 0 0;">${lowStockCount}</p>
+                    </div>
+                </div>
+
+                <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
+                    <h4 style="margin-top:0;">🎟️ Create Discount Coupon Code</h4>
+                    <form action="/api/add-coupon" method="POST" style="display:flex; gap:10px; max-width:500px; flex-wrap:wrap;">
+                        <input type="text" name="code" placeholder="Coupon Code (e.g. EID100)" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px; flex:1;" required>
+                        <input type="number" name="discountAmount" placeholder="Discount (Tk)" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px; width:120px;" required>
+                        <button type="submit" class="btn" style="padding:8px 14px;">Add Coupon</button>
+                    </form>
+                    <div style="margin-top:10px; max-width:500px; overflow-x:auto;">
+                        <table border="1" cellpadding="5" style="width:100%; border-collapse:collapse; font-size:12px;">
+                            <tr><th>Code</th><th>Discount</th><th>Action</th></tr>
+                            ${couponsHTML.length ? couponsHTML : '<tr><td colspan="3" style="text-align:center;">No coupons created.</td></tr>'}
+                        </table>
                     </div>
                 </div>
 
@@ -864,11 +1004,15 @@ app.get('/admin-dashboard', async (req, res) => {
                     <form action="/api/add-product" method="POST" enctype="multipart/form-data" style="display:grid; gap:8px; max-width:500px;">
                         <input type="text" name="name" placeholder="Product Name" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
                         <select name="category" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                            <option value="Fashion">Fashion</option>
-                            <option value="Electronics">Electronics</option>
-                            <option value="Groceries">Groceries</option>
-                            <option value="Home">Home & Living</option>
-                            <option value="Beauty">Beauty & Health</option>
+                            <option value="Fashion">ফ্যাশন (Fashion)</option>
+                            <option value="Supershop">সুপার শপ (Supershop)</option>
+                            <option value="Pharmacy">ফার্মেসি (Pharmacy)</option>
+                            <option value="Food">খাদ্যপণ্য (Food)</option>
+                            <option value="Sports">স্পোর্টস (Sports)</option>
+                            <option value="Books">বই (Books)</option>
+                            <option value="Stationery">স্টেশনারি (Stationery)</option>
+                            <option value="HomeDecor">হোম ডেকোর ও ফার্নিচার (Home Decor & Furniture)</option>
+                            <option value="BeautyCare">বিউটি পার্লার কেয়ার (Beauty Care)</option>
                         </select>
                         <input type="number" name="price" placeholder="Price (Tk)" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
                         <input type="number" name="stock" placeholder="Stock Quantity" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
@@ -888,9 +1032,7 @@ app.get('/admin-dashboard', async (req, res) => {
                     <h4 style="margin-top:0;">🎬 Add Facebook Post / Reels Video</h4>
                     <form action="/api/add-fb-content" method="POST" enctype="multipart/form-data" style="display:grid; gap:8px; max-width:500px;">
                         <input type="text" name="title" placeholder="Post Title / Description" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                        
                         <input type="text" name="productLink" placeholder="Product Link (e.g. /product/ID or /)" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
-
                         <select name="mediaType" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
                             <option value="image">Image</option>
                             <option value="reels">Reels Video</option>
@@ -901,7 +1043,7 @@ app.get('/admin-dashboard', async (req, res) => {
                 </div>
 
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; overflow-x:auto;">
-                    <h4 style="margin-top:0;">📋 Manage Products & Sold Tracking (Price & Stock Edit)</h4>
+                    <h4 style="margin-top:0;">📋 Manage Products & Sold Tracking</h4>
                     <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
                         <tr><th>Img</th><th>Name</th><th>Price</th><th>Stock</th><th>Sold</th><th>Action</th></tr>
                         ${productsHTML}
@@ -912,21 +1054,11 @@ app.get('/admin-dashboard', async (req, res) => {
                     <h4 style="margin-top:0;">🛍️ Customer Orders Management</h4>
                     
                     <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
-                        <a href="/admin-dashboard?tab=pending" class="btn" style="background:${activeTab === 'pending' ? '#f85606' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
-                            ⏳ Pending (${pendingCount})
-                        </a>
-                        <a href="/admin-dashboard?tab=confirmed" class="btn" style="background:${activeTab === 'confirmed' ? '#007bff' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
-                            📦 Confirmed (${confirmedCount})
-                        </a>
-                        <a href="/admin-dashboard?tab=completed" class="btn" style="background:${activeTab === 'completed' ? '#28a745' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
-                            ✅ Completed (${completedCount})
-                        </a>
-                        <a href="/admin-dashboard?tab=cancelled" class="btn" style="background:${activeTab === 'cancelled' ? '#dc3545' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
-                            ❌ Cancelled (${cancelledCount})
-                        </a>
-                        <a href="/admin-dashboard?tab=trash" class="btn" style="background:${activeTab === 'trash' ? '#6c757d' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
-                            🗑️ Trash (${trashCount})
-                        </a>
+                        <a href="/admin-dashboard?tab=pending" class="btn" style="background:${activeTab === 'pending' ? '#f85606' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">⏳ Pending (${pendingCount})</a>
+                        <a href="/admin-dashboard?tab=confirmed" class="btn" style="background:${activeTab === 'confirmed' ? '#007bff' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">📦 Confirmed (${confirmedCount})</a>
+                        <a href="/admin-dashboard?tab=completed" class="btn" style="background:${activeTab === 'completed' ? '#28a745' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">✅ Completed (${completedCount})</a>
+                        <a href="/admin-dashboard?tab=cancelled" class="btn" style="background:${activeTab === 'cancelled' ? '#dc3545' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">❌ Cancelled (${cancelledCount})</a>
+                        <a href="/admin-dashboard?tab=trash" class="btn" style="background:${activeTab === 'trash' ? '#6c757d' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">🗑️ Trash (${trashCount})</a>
                     </div>
 
                     <div style="overflow-x:auto;">
@@ -955,6 +1087,101 @@ app.get('/admin-dashboard', async (req, res) => {
     `);
 });
 
+app.post('/api/add-coupon', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        const { code, discountAmount } = req.body;
+        await new Coupon({ code: code.trim(), discountAmount: Number(discountAmount) }).save();
+        res.redirect('/admin-dashboard');
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.get('/api/delete-coupon/:id', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        await Coupon.findByIdAndDelete(req.params.id);
+        res.redirect('/admin-dashboard');
+    } catch (err) {
+        next(err);
+    }
+});
+
+// ================= Invoice / Cash Memo Route =================
+
+app.get('/admin/invoice/:id', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        let order = await Order.findById(req.params.id);
+        if (!order) return res.send('Order not found');
+
+        let itemsListHTML = order.items.map(i => `
+            <tr>
+                <td style="padding:8px; border-bottom:1px solid #ddd;">${i.productName}</td>
+                <td style="padding:8px; border-bottom:1px solid #ddd; text-align:center;">1</td>
+                <td style="padding:8px; border-bottom:1px solid #ddd; text-align:right;">৳${i.price}</td>
+            </tr>
+        `).join('');
+
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Invoice - ${order._id}</title>
+                <style>
+                    body { font-family: sans-serif; padding: 20px; background: #fff; color: #333; }
+                    .invoice-box { max-width: 700px; margin: auto; padding: 30px; border: 1px solid #eee; box-shadow: 0 0 10px rgba(0, 0, 0, 0.15); }
+                    .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                    th { background: #f85606; color: white; text-align: left; padding: 8px; }
+                    .totals { margin-top: 20px; text-align: right; }
+                    @media print { body { padding: 0; } .invoice-box { border: none; box-shadow: none; } .no-print { display: none; } }
+                </style>
+            </head>
+            <body>
+                <div class="invoice-box">
+                    <div class="header">
+                        <div>
+                            <h2>🛒 Online Shop Invoice</h2>
+                            <p style="font-size:12px; color:#666;">Order ID: ${order._id}<br>Date: ${new Date(order.createdAt).toLocaleString()}</p>
+                        </div>
+                        <div style="text-align:right;">
+                            <p><b>Customer Email:</b> ${order.userEmail}</p>
+                            <p><b>Delivery Area:</b> ${order.deliveryArea || 'N/A'}</p>
+                        </div>
+                    </div>
+                    
+                    <table>
+                        <tr>
+                            <th>Item Description</th>
+                            <th style="text-align:center;">Qty</th>
+                            <th style="text-align:right;">Price</th>
+                        </tr>
+                        ${itemsListHTML}
+                    </table>
+
+                    <div class="totals">
+                        <p>Product Subtotal: ৳${order.productPrice || (order.totalAmount - order.deliveryCharge)}</p>
+                        <p>Delivery Charge (${order.deliveryArea}): ৳${order.deliveryCharge}</p>
+                        ${order.discountPrice ? `<p>Coupon Discount: -৳${order.discountPrice}</p>` : ''}
+                        <h3>Total Amount: ৳${order.totalAmount}</h3>
+                        <p style="font-size:13px; color:#555;">Payment Method: <b>${order.paymentMethod}</b> ${order.senderNumber ? `(Sender: ${order.senderNumber}, Paid: ৳${order.paidAmount})` : ''}</p>
+                        ${order.customerNote ? `<p style="font-size:13px; color:red;"><b>Note:</b> ${order.customerNote}</p>` : ''}
+                    </div>
+
+                    <div class="no-print" style="margin-top:30px; text-align:center;">
+                        <button onclick="window.print()" style="background:#f85606; color:white; border:none; padding:10px 20px; font-size:16px; border-radius:4px; cursor:pointer;">🖨️ Print Invoice</button>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `);
+    } catch (err) {
+        next(err);
+    }
+});
+
 // ================= Product Edit Routes =================
 
 app.get('/admin/edit-product/:id', async (req, res, next) => {
@@ -977,14 +1204,18 @@ app.get('/admin/edit-product/:id', async (req, res, next) => {
 
                         <label style="font-size:13px; font-weight:600;">Category:</label>
                         <select name="category" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>
-                            <option value="Fashion" ${product.category === 'Fashion' ? 'selected' : ''}>Fashion</option>
-                            <option value="Electronics" ${product.category === 'Electronics' ? 'selected' : ''}>Electronics</option>
-                            <option value="Groceries" ${product.category === 'Groceries' ? 'selected' : ''}>Groceries</option>
-                            <option value="Home" ${product.category === 'Home' ? 'selected' : ''}>Home & Living</option>
-                            <option value="Beauty" ${product.category === 'Beauty' ? 'selected' : ''}>Beauty & Health</option>
+                            <option value="Fashion" ${product.category === 'Fashion' ? 'selected' : ''}>ফ্যাশন (Fashion)</option>
+                            <option value="Supershop" ${product.category === 'Supershop' ? 'selected' : ''}>সুপার শপ (Supershop)</option>
+                            <option value="Pharmacy" ${product.category === 'Pharmacy' ? 'selected' : ''}>ফার্মেসি (Pharmacy)</option>
+                            <option value="Food" ${product.category === 'Food' ? 'selected' : ''}>খাদ্যপণ্য (Food)</option>
+                            <option value="Sports" ${product.category === 'Sports' ? 'selected' : ''}>স্পোর্টস (Sports)</option>
+                            <option value="Books" ${product.category === 'Books' ? 'selected' : ''}>বই (Books)</option>
+                            <option value="Stationery" ${product.category === 'Stationery' ? 'selected' : ''}>স্টেশনারি (Stationery)</option>
+                            <option value="HomeDecor" ${product.category === 'HomeDecor' ? 'selected' : ''}>হোম ডেকোর ও ফার্নিচার (Home Decor & Furniture)</option>
+                            <option value="BeautyCare" ${product.category === 'BeautyCare' ? 'selected' : ''}>বিউটি পার্লার কেয়ার (Beauty Care)</option>
                         </select>
 
-                        <label style="font-size:13px; font-weight:600;">Price (Tk) - দাম কমান বা বাড়ান:</label>
+                        <label style="font-size:13px; font-weight:600;">Price (Tk):</label>
                         <input type="number" name="price" value="${product.price}" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>
 
                         <label style="font-size:13px; font-weight:600;">Stock Quantity:</label>
@@ -1011,7 +1242,6 @@ app.post('/api/update-product/:id', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         const { name, category, price, stock, description } = req.body;
-
         await Product.findByIdAndUpdate(req.params.id, {
             name,
             category,
@@ -1019,7 +1249,6 @@ app.post('/api/update-product/:id', async (req, res, next) => {
             stock: Number(stock),
             description
         });
-
         res.send(`<script>alert('Product updated successfully!'); window.location.href='/admin-dashboard';</script>`);
     } catch (err) {
         next(err);
@@ -1100,8 +1329,7 @@ app.get('/api/change-order-status/:id/:status', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         const { id, status } = req.params;
-        
-        let order = await Order.findByIdAndUpdate(id, { status, previousStatus: status });
+        await Order.findByIdAndUpdate(id, { status, previousStatus: status });
         
         let redirectTab = 'pending';
         if (status === 'Confirmed') redirectTab = 'confirmed';
