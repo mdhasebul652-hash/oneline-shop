@@ -1,7 +1,16 @@
+const mongoose = require('mongoose');
 const express = require('express');
 const cookieParser = require('cookie-parser');
+
 const app = express();
 const PORT = 3000;
+
+// ডেটাবেস কানেকশন (আপনার নতুন ইউজার ও পাসওয়ার্ড দিয়ে আপডেট করা)
+const dbURI = 'mongodb+srv://hasebul:hasebul1234@hasebul.v1tb47m.mongodb.net/?appName=hasebul';
+
+mongoose.connect(dbURI)
+    .then(() => console.log('সফলভাবে ডেটাবেস কানেক্ট হয়েছে!'))
+    .catch(err => console.log('কানেকশন এরর:', err));
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -11,9 +20,9 @@ app.use(cookieParser());
 let users = []; // { email, password, role }
 let userProfiles = {}; // email -> { name, phone, address }
 let products = [
-    { id: '1', name: 'টি-শার্ট', category: 'fashion', price: ৫০০, image: 'https://via.placeholder.com/150' },
-    { id: '2', name: 'স্মার্ট ওয়াচ', category: 'electronics', price: ১৫০০, image: 'https://via.placeholder.com/150' },
-    { id: '3', name: 'বই', category: 'books', price: ২৫০, image: 'https://via.placeholder.com/150' }
+    { id: '1', name: 'T-Shirt', category: 'fashion', price: 500, image: 'https://via.placeholder.com/150' },
+    { id: '2', name: 'Smart Watch', category: 'electronics', price: 1500, image: 'https://via.placeholder.com/150' },
+    { id: '3', name: 'Book', category: 'books', price: 250, image: 'https://via.placeholder.com/150' }
 ];
 let orders = [];
 let pendingReviews = [];
@@ -50,35 +59,31 @@ app.get('/', (req, res) => {
         <div style="border:1px solid #ddd; padding:10px; margin:5px; width:150px; display:inline-block; text-align:center; border-radius:6px; background:#fff;">
             <img src="${p.image}" width="100" style="border-radius:4px;"><br>
             <strong>${p.name}</strong><br>
-            <span style="color:green; font-size:13px;">মূল্য: ${p.price} টাকা</span><br>
-            <a href="/product/${p.id}" style="background:#007bff; color:white; padding:4px 8px; text-decoration:none; display:inline-block; margin-top:5px; border-radius:4px; font-size:12px;">বিস্তারিত দেখুন</a>
+            <span style="color:green; font-size:13px;">Price: ${p.price} BDT</span><br>
+            <a href="/product/${p.id}" style="background:#007bff; color:white; padding:4px 8px; text-decoration:none; display:inline-block; margin-top:5px; border-radius:4px; font-size:12px;">View Details</a>
         </div>
     `).join('');
 
-    // আইকন সেকশন দুই লাইনে সাজানো এবং নামের লেবেল সহ
     let topIconsHTML = '';
     if (user && user.role === 'user') {
         topIconsHTML = `
             <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
-                <!-- প্রথম লাইন -->
                 <div style="display:flex; gap:15px;">
-                    <div style="text-align:center;"><a href="/user-dashboard" style="text-decoration:none; font-size:18px;">🛒</a><br><span style="font-size:11px;">কার্ট</span></div>
-                    <div style="text-align:center;"><a href="/my-orders" style="text-decoration:none; font-size:18px;">📦</a><br><span style="font-size:11px;">আমার অর্ডার</span></div>
+                    <div style="text-align:center;"><a href="/user-dashboard" style="text-decoration:none; font-size:18px;">🛒</a><br><span style="font-size:11px;">Cart</span></div>
+                    <div style="text-align:center;"><a href="/my-orders" style="text-decoration:none; font-size:18px;">📦</a><br><span style="font-size:11px;">My Orders</span></div>
                 </div>
-                <!-- দ্বিতীয় লাইন -->
                 <div style="display:flex; gap:15px;">
-                    <div style="text-align:center;"><a href="/profile" style="text-decoration:none; font-size:18px;">👤</a><br><span style="font-size:11px;">প্রোফাইল</span></div>
-                    <div style="text-align:center;"><a href="/logout" style="text-decoration:none; font-size:18px;">🚪</a><br><span style="font-size:11px;">লগআউট</span></div>
+                    <div style="text-align:center;"><a href="/profile" style="text-decoration:none; font-size:18px;">👤</a><br><span style="font-size:11px;">Profile</span></div>
+                    <div style="text-align:center;"><a href="/logout" style="text-decoration:none; font-size:18px;">🚪</a><br><span style="font-size:11px;">Logout</span></div>
                 </div>
             </div>
         `;
     } else {
         topIconsHTML = `
             <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
-                <!-- প্রথম লাইন -->
                 <div style="display:flex; gap:15px;">
-                    <div style="text-align:center;"><a href="/login" style="text-decoration:none; font-size:18px;">🔑</a><br><span style="font-size:11px;">লগইন</span></div>
-                    <div style="text-align:center;"><a href="/register" style="text-decoration:none; font-size:18px;">📝</a><br><span style="font-size:11px;">রেজিস্ট্রেশন</span></div>
+                    <div style="text-align:center;"><a href="/login" style="text-decoration:none; font-size:18px;">🔑</a><br><span style="font-size:11px;">Login</span></div>
+                    <div style="text-align:center;"><a href="/register" style="text-decoration:none; font-size:18px;">📝</a><br><span style="font-size:11px;">Register</span></div>
                 </div>
             </div>
         `;
@@ -86,27 +91,27 @@ app.get('/', (req, res) => {
 
     res.send(`
         <!DOCTYPE html>
-        <html lang="bn">
+        <html lang="en">
         <head>
             <meta charset="UTF-8">
-            <title>ই-কমার্স হোম পেজ</title>
+            <title>E-Commerce Home Page</title>
         </head>
         <body style="font-family:Arial, sans-serif; background:#f4f4f4; margin:0; padding:20px;">
             <div style="display:flex; justify-content:space-between; align-items:center; background:white; padding:15px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-                <h2 style="margin:0; color:#333;">আমাদের শপ</h2>
+                <h2 style="margin:0; color:#333;">Our Shop</h2>
                 <div>${topIconsHTML}</div>
             </div>
 
             <div style="margin-top:20px; background:white; padding:10px; border-radius:8px;">
-                <strong>ক্যাটাগরি: </strong>
-                <a href="/?category=all" style="margin-right:10px; text-decoration:none; color:${selectedCategory === 'all' ? 'red' : 'blue'};">সব</a>
-                <a href="/?category=fashion" style="margin-right:10px; text-decoration:none; color:${selectedCategory === 'fashion' ? 'red' : 'blue'};">ফ্যাশন</a>
-                <a href="/?category=electronics" style="margin-right:10px; text-decoration:none; color:${selectedCategory === 'electronics' ? 'red' : 'blue'};">ইলেকট্রনিক্স</a>
-                <a href="/?category=books" style="text-decoration:none; color:${selectedCategory === 'books' ? 'red' : 'blue'};">বই</a>
+                <strong>Category: </strong>
+                <a href="/?category=all" style="margin-right:10px; text-decoration:none; color:${selectedCategory === 'all' ? 'red' : 'blue'};">All</a>
+                <a href="/?category=fashion" style="margin-right:10px; text-decoration:none; color:${selectedCategory === 'fashion' ? 'red' : 'blue'};">Fashion</a>
+                <a href="/?category=electronics" style="margin-right:10px; text-decoration:none; color:${selectedCategory === 'electronics' ? 'red' : 'blue'};">Electronics</a>
+                <a href="/?category=books" style="margin-right:10px; text-decoration:none; color:${selectedCategory === 'books' ? 'red' : 'blue'};">Books</a>
             </div>
 
             <div style="margin-top:20px;">
-                <h3>প্রোডাক্ট তালিকা</h3>
+                <h3>Product List</h3>
                 <div>${productHTML}</div>
             </div>
         </body>
@@ -123,21 +128,21 @@ app.get('/profile', (req, res) => {
 
     res.send(`
         <!DOCTYPE html>
-        <html lang="bn">
-        <head><meta charset="UTF-8"><title>প্রোফাইল সেটিংস</title></head>
+        <html lang="en">
+        <head><meta charset="UTF-8"><title>Profile Settings</title></head>
         <body style="font-family:Arial, sans-serif; background:#f4f4f4; padding:20px;">
             <div style="max-width:400px; margin:auto; background:white; padding:20px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-                <h2>আপনার প্রোফাইল তথ্য</h2>
+                <h2>Your Profile Info</h2>
                 <form action="/api/save-profile" method="POST">
-                    <label>নাম:</label><br>
+                    <label>Name:</label><br>
                     <input type="text" name="name" value="${profile.name}" style="width:100%; padding:8px; margin:5px 0;" required><br>
-                    <label>ফোন নম্বর:</label><br>
+                    <label>Phone Number:</label><br>
                     <input type="text" name="phone" value="${profile.phone}" style="width:100%; padding:8px; margin:5px 0;" required><br>
-                    <label>ডেলিভারি ঠিকানা:</label><br>
+                    <label>Delivery Address:</label><br>
                     <textarea name="address" style="width:100%; padding:8px; margin:5px 0;" required>${profile.address}</textarea><br>
-                    <button type="submit" style="background:#28a745; color:white; border:none; padding:10px 15px; border-radius:4px; cursor:pointer; width:100%;">প্রোফাইল সেভ করুন</button>
+                    <button type="submit" style="background:#28a745; color:white; border:none; padding:10px 15px; border-radius:4px; cursor:pointer; width:100%;">Save Profile</button>
                 </form>
-                <br><a href="/">হোমে ফিরে যান</a>
+                <br><a href="/">Go Back Home</a>
             </div>
         </body>
         </html>
@@ -151,26 +156,25 @@ app.post('/api/save-profile', (req, res) => {
     res.redirect('/');
 });
 
-// প্রোডাক্ট বিস্তারিত ও অর্ডার পেজ (প্রোফাইল সেভ না থাকলে প্রোফাইলে রিডাইরেক্ট করবে)
 app.get('/product/:id', (req, res) => {
     const product = products.find(p => p.id === req.params.id);
-    if (!product) return res.send('প্রোডাক্ট পাওয়া যায়নি!');
+    if (!product) return res.send('Product not found!');
 
     res.send(`
         <!DOCTYPE html>
-        <html lang="bn">
+        <html lang="en">
         <head><meta charset="UTF-8"><title>${product.name}</title></head>
         <body style="font-family:Arial, sans-serif; background:#f4f4f4; padding:20px;">
             <div style="max-width:500px; margin:auto; background:white; padding:20px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
                 <img src="${product.image}" width="150"><br>
                 <h2>${product.name}</h2>
-                <p style="color:green; font-size:16px;">মূল্য: ${product.price} টাকা</p>
-                
+                <p style="color:green; font-size:16px;">Price: ${product.price} BDT</p>
+               
                 <form action="/api/place-order" method="POST">
                     <input type="hidden" name="productId" value="${product.id}">
-                    <button type="submit" style="background:#ffc107; color:black; border:none; padding:10px 20px; border-radius:4px; font-size:16px; cursor:pointer; font-weight:bold;">এখনই কিনুন</button>
+                    <button type="submit" style="background:#ffc107; color:black; border:none; padding:10px 20px; border-radius:4px; font-size:16px; cursor:pointer; font-weight:bold;">Buy Now</button>
                 </form>
-                <br><a href="/">হোমে ফিরে যান</a>
+                <br><a href="/">Go Back Home</a>
             </div>
         </body>
         </html>
@@ -180,12 +184,11 @@ app.get('/product/:id', (req, res) => {
 app.post('/api/place-order', (req, res) => {
     if (!req.user || req.user.role !== 'user') return res.redirect('/login');
     
-    // চেক করা ইউজার প্রোফাইল আগে থেকে সেট করেছে কি না
     const profile = userProfiles[req.user.email];
     if (!profile || !profile.address || !profile.phone) {
         return res.send(`
             <script>
-                alert('দয়া করে অর্ডার করার আগে আপনার প্রোফাইল তথ্য (নাম, ফোন, ঠিকানা) সম্পূর্ণ করুন!');
+                alert('Please complete your profile info (Name, Phone, Address) before placing an order!');
                 window.location.href = '/profile';
             </script>
         `);
@@ -206,35 +209,34 @@ app.post('/api/place-order', (req, res) => {
 
     res.send(`
         <script>
-            alert('আপনার অর্ডারটি সফলভাবে সম্পন্ন হয়েছে!');
+            alert('Your order has been placed successfully!');
             window.location.href = '/my-orders';
         </script>
     `);
 });
 
-// আমার অর্ডার দেখার পেজ
 app.get('/my-orders', (req, res) => {
     if (!req.user || req.user.role !== 'user') return res.redirect('/login');
     
     const userOrders = orders.filter(o => o.userEmail === req.user.email);
     let ordersHTML = userOrders.length > 0 ? userOrders.map(o => `
         <div style="border-bottom:1px solid #ddd; padding:10px; margin-bottom:10px;">
-            <strong>প্রোডাক্ট:</strong> ${o.productName} <br>
-            <strong>মূল্য:</strong> ${o.price} টাকা <br>
-            <strong>তারিখ:</strong> ${o.date} <br>
-            <strong>ডেলিভারি ঠিকানা:</strong> ${o.shippingInfo.address} (${o.shippingInfo.phone})
+            <strong>Product:</strong> ${o.productName} <br>
+            <strong>Price:</strong> ${o.price} BDT <br>
+            <strong>Date:</strong> ${o.date} <br>
+            <strong>Delivery Address:</strong> ${o.shippingInfo.address} (${o.shippingInfo.phone})
         </div>
-    `).join('') : '<p>আপনার কোনো অর্ডার নেই।</p>';
+    `).join('') : '<p>You have no orders.</p>';
 
     res.send(`
         <!DOCTYPE html>
-        <html lang="bn">
-        <head><meta charset="UTF-8"><title>আমার অর্ডার</title></head>
+        <html lang="en">
+        <head><meta charset="UTF-8"><title>My Orders</title></head>
         <body style="font-family:Arial, sans-serif; background:#f4f4f4; padding:20px;">
             <div style="max-width:600px; margin:auto; background:white; padding:20px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-                <h2>আমার অর্ডারসমূহ</h2>
+                <h2>My Orders</h2>
                 <div>${ordersHTML}</div>
-                <br><a href="/">হোমে ফিরে যান</a>
+                <br><a href="/">Go Back Home</a>
             </div>
         </body>
         </html>
@@ -246,16 +248,16 @@ app.get('/my-orders', (req, res) => {
 // ==========================================
 app.get('/login', (req, res) => {
     res.send(`
-        <!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>লগইন</title></head>
+        <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Login</title></head>
         <body style="font-family:Arial, sans-serif; background:#f4f4f4; padding:50px;">
             <div style="max-width:300px; margin:auto; background:white; padding:20px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-                <h2>লগইন করুন</h2>
+                <h2>Login</h2>
                 <form action="/api/login" method="POST">
-                    <input type="email" name="email" placeholder="ইমেইল" style="width:100%; padding:8px; margin:5px 0;" required><br>
-                    <input type="password" name="password" placeholder="পাসওয়ার্ড" style="width:100%; padding:8px; margin:5px 0;" required><br>
-                    <button type="submit" style="background:#007bff; color:white; border:none; padding:10px; width:100%; border-radius:4px; cursor:pointer;">লগইন</button>
+                    <input type="email" name="email" placeholder="Email" style="width:100%; padding:8px; margin:5px 0;" required><br>
+                    <input type="password" name="password" placeholder="Password" style="width:100%; padding:8px; margin:5px 0;" required><br>
+                    <button type="submit" style="background:#007bff; color:white; border:none; padding:10px; width:100%; border-radius:4px; cursor:pointer;">Login</button>
                 </form>
-                <br><a href="/">হোমে ফিরে যান</a>
+                <br><a href="/">Go Back Home</a>
             </div>
         </body></html>
     `);
@@ -263,7 +265,6 @@ app.get('/login', (req, res) => {
 
 app.post('/api/login', (req, res) => {
     const { email, password } = req.body;
-    // সিম্পল এডমিন চেক
     let role = (email === 'admin@gmail.com' && password === '1234') ? 'admin' : 'user';
     
     res.cookie('userSession', JSON.stringify({ email, role }), { httpOnly: true });
@@ -276,16 +277,16 @@ app.post('/api/login', (req, res) => {
 
 app.get('/register', (req, res) => {
     res.send(`
-        <!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>রেজিস্ট্রেশন</title></head>
+        <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Register</title></head>
         <body style="font-family:Arial, sans-serif; background:#f4f4f4; padding:50px;">
             <div style="max-width:300px; margin:auto; background:white; padding:20px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-                <h2>রেজিস্ট্রেশন করুন</h2>
+                <h2>Register</h2>
                 <form action="/api/register" method="POST">
-                    <input type="email" name="email" placeholder="ইমেইল" style="width:100%; padding:8px; margin:5px 0;" required><br>
-                    <input type="password" name="password" placeholder="পাসওয়ার্ড" style="width:100%; padding:8px; margin:5px 0;" required><br>
-                    <button type="submit" style="background:#28a745; color:white; border:none; padding:10px; width:100%; border-radius:4px; cursor:pointer;">রেজিস্ট্রেশন</button>
+                    <input type="email" name="email" placeholder="Email" style="width:100%; padding:8px; margin:5px 0;" required><br>
+                    <input type="password" name="password" placeholder="Password" style="width:100%; padding:8px; margin:5px 0;" required><br>
+                    <button type="submit" style="background:#28a745; color:white; border:none; padding:10px; width:100%; border-radius:4px; cursor:pointer;">Register</button>
                 </form>
-                <br><a href="/">হোমে ফিরে যান</a>
+                <br><a href="/">Go Back Home</a>
             </div>
         </body></html>
     `);
@@ -302,10 +303,9 @@ app.get('/logout', (req, res) => {
     res.redirect('/');
 });
 
-// এডমিন ড্যাশবোর্ড (সংক্ষিপ্ত)
 app.get('/admin-dashboard', (req, res) => {
     if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-    res.send(`<h2>এডমিন প্যানেল</h2><br><a href="/logout">লগআউট</a>`);
+    res.send(`<h2>Admin Panel</h2><br><a href="/logout">Logout</a>`);
 });
 
 // সার্ভার স্টার্ট
