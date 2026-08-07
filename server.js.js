@@ -501,7 +501,7 @@ app.get('/login', (req, res) => {
                     <input type="password" name="password" style="width:100%; padding:10px; margin:4px 0 15px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
                     <button type="submit" class="btn" style="width:100%; padding:10px;">Login</button>
                 </form>
-                <p style="font-size:13px; text-align:center; margin-top:15px;">New user? <a href="/register">Register here</a></p>
+                <p style="font-size:13px; text-align:center; margin-top:15px;">New user? <a href="/register?redirect=${encodeURIComponent(redirectUrl)}">Register here</a></p>
             </div>
         </body>
         </html>
@@ -519,6 +519,7 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.get('/register', (req, res) => {
+    let redirectUrl = req.query.redirect || '/dashboard';
     res.send(`
         <!DOCTYPE html>
         <html>
@@ -528,13 +529,14 @@ app.get('/register', (req, res) => {
             <div class="container" style="max-width:350px; background:white; padding:20px; border-radius:6px; margin-top:30px; box-shadow:0 2px 5px rgba(0,0,0,0.1);">
                 <h3 style="margin-top:0;">Register Account</h3>
                 <form action="/api/register" method="POST">
+                    <input type="hidden" name="redirect" value="${redirectUrl}">
                     <label style="font-size:13px; font-weight:600;">Email:</label><br>
                     <input type="email" name="email" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
                     <label style="font-size:13px; font-weight:600;">Password:</label><br>
                     <input type="password" name="password" style="width:100%; padding:10px; margin:4px 0 15px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
                     <button type="submit" class="btn btn-buy" style="width:100%; padding:10px;">Register</button>
                 </form>
-                <p style="font-size:13px; text-align:center; margin-top:15px;">Already have an account? <a href="/login">Login here</a></p>
+                <p style="font-size:13px; text-align:center; margin-top:15px;">Already have an account? <a href="/login?redirect=${encodeURIComponent(redirectUrl)}">Login here</a></p>
             </div>
         </body>
         </html>
@@ -542,7 +544,7 @@ app.get('/register', (req, res) => {
 });
 
 app.post('/api/register', async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, redirect } = req.body;
     let existing = await User.findOne({ email });
     if (existing) return res.send(`<script>alert('Email already exists!'); window.location.href='/register';</script>`);
 
@@ -552,7 +554,7 @@ app.post('/api/register', async (req, res) => {
     let newUser = new User({ email, password: hashedPassword, role });
     await newUser.save();
     res.cookie('userSession', JSON.stringify({ email: newUser.email, role: newUser.role }));
-    res.redirect('/dashboard');
+    res.redirect(redirect || '/dashboard');
 });
 
 app.get('/logout', (req, res) => {
