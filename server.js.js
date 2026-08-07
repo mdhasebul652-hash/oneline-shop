@@ -358,29 +358,46 @@ app.post('/api/chat', async (req, res) => {
     res.redirect('back');
 });
 
-// ================= My Orders Page =================
+// ================= My Orders Page (With Status Tracking for Users) =================
 
 app.get('/my-orders', async (req, res) => {
     if (!req.user) return res.redirect('/login?redirect=/my-orders');
+    // Fetch user orders excluding Trash status so users see active progress
     let orders = await Order.find({ userEmail: req.user.email, status: { $ne: 'Trash' } }).sort({ _id: -1 });
     
-    let ordersHTML = orders.map(o => `
-        <div style="background:#fff; padding:15px; margin-bottom:12px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-size:14px;">
-            <p style="margin:5px 0;"><b>Order ID:</b> ${o._id}</p>
-            <p style="margin:5px 0;"><b>Total Amount:</b> ৳${o.totalAmount} (${o.paymentMethod})</p>
-            <p style="margin:5px 0;"><b>Status:</b> <span style="color:${o.status === 'Delivered' ? 'green' : (o.status === 'Confirmed' ? '#007bff' : '#f85606')}; font-weight:bold;">অর্ডার কনফার্ম হয়েছে / ${o.status}</span></p>
-            <p style="margin:5px 0; color:#666; font-size:12px;"><b>Date:</b> ${new Date(o.createdAt).toLocaleString()}</p>
-        </div>
-    `).join('');
+    let ordersHTML = orders.map(o => {
+        let statusColor = '#f85606'; // Pending
+        let statusText = 'Pending (অর্ডার অপেক্ষমান আছে)';
+        
+        if (o.status === 'Confirmed') {
+            statusColor = '#007bff';
+            statusText = 'Confirmed (আপনার অর্ডারটি কনফার্ম করা হয়েছে)';
+        } else if (o.status === 'Delivered') {
+            statusColor = '28a745';
+            statusText = 'Completed / Delivered (আপনার অর্ডারটি সফলভাবে সম্পন্ন হয়েছে)';
+        }
+
+        let itemsList = o.items.map(i => `${i.productName} (৳${i.price})`).join(', ');
+
+        return `
+            <div style="background:#fff; padding:15px; margin-bottom:12px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-size:14px;">
+                <p style="margin:5px 0;"><b>Order ID:</b> ${o._id}</p>
+                <p style="margin:5px 0;"><b>Items:</b> ${itemsList}</p>
+                <p style="margin:5px 0;"><b>Total Amount:</b> ৳${o.totalAmount} (${o.paymentMethod})</p>
+                <p style="margin:5px 0;"><b>Status Update:</b> <span style="color:${statusColor}; font-weight:bold;">${statusText}</span></p>
+                <p style="margin:5px 0; color:#666; font-size:12px;"><b>Date:</b> ${new Date(o.createdAt).toLocaleString()}</p>
+            </div>
+        `;
+    }).join('');
 
     res.send(`
         <!DOCTYPE html>
         <html>
-        <head><title>My Orders</title>${globalHeaderHTML}</head>
+        <head><title>My Orders & Status</title>${globalHeaderHTML}</head>
         <body>
             ${getNavbarHTML(req.user)}
             <div class="container" style="max-width:800px;">
-                <h3 style="margin-bottom:15px;">📦 My Orders List</h3>
+                <h3 style="margin-bottom:15px;">📦 My Orders Tracking</h3>
                 ${ordersHTML.length ? ordersHTML : '<div style="background:white; padding:30px; text-align:center; border-radius:6px;"><p>You have not placed any orders yet.</p></div>'}
             </div>
         </body>
@@ -689,11 +706,11 @@ app.get('/admin-dashboard', async (req, res) => {
         let actionButtons = '';
         if (o.status === 'Pending') {
             actionButtons = `
-                <a href="/api/change-order-status/${o._id}/Confirmed" class="btn btn-buy" style="padding:4px 8px; font-size:11px; margin-right:4px;">Confirm Order</a>
+                <a href="/api/change-order-status/${o._id}/Confirmed?tab=${activeTab}" class="btn btn-buy" style="padding:4px 8px; font-size:11px; margin-right:4px;">Confirm Order</a>
             `;
         } else if (o.status === 'Confirmed') {
             actionButtons = `
-                <a href="/api/change-order-status/${o._id}/Delivered" class="btn" style="background:#28a745; padding:4px 8px; font-size:11px; margin-right:4px;">অর্ডার সম্পন্ন হয়েছে (Delivered)</a>
+                <a href="/api/change-order-status/${o._id}/Delivered?tab=${activeTab}" class="btn" style="background:#28a745; padding:4px 8px; font-size:11px; margin-right:4px;">Completed (Delivered)</a>
             `;
         } else if (o.status === 'Trash') {
             actionButtons = `
@@ -888,11 +905,11 @@ app.get('/api/move-to-trash/:id', async (req, res, next) => {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         let order = await Order.findById(req.params.id);
         if (order) {
-            order.previousStatus = order.status; // Save current status before moving to trash
+            order.previousStatus = order.status; 
             order.status = 'Trash';
             await order.save();
         }
-        res.redirect('back');
+        res.redirect('/admin-dashboard?tab=trash');
     } catch (err) {
         next(err);
     }
@@ -904,10 +921,12 @@ app.get('/api/restore-order/:id', async (req, res, next) => {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         let order = await Order.findById(req.params.id);
         if (order) {
+            let targetTab = (order.previousStatus === 'Confirmed') ? 'confirmed' : (order.previousStatus === 'Delivered' ? 'completed' : 'pending');
             order.status = order.previousStatus || 'Pending';
             await order.save();
+            return res.redirect(`/admin-dashboard?tab=${targetTab}`);
         }
-        res.redirect('back');
+        res.redirect('/admin-dashboard');
     } catch (err) {
         next(err);
     }
@@ -918,7 +937,7 @@ app.get('/api/permanent-delete-order/:id', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         await Order.findByIdAndDelete(req.params.id);
-        res.redirect('back');
+        res.redirect('/admin-dashboard?tab=trash');
     } catch (err) {
         next(err);
     }
@@ -929,11 +948,15 @@ app.get('/api/change-order-status/:id/:status', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         const { id, status } = req.params;
+        let currentTab = req.query.tab || 'pending';
+        
         let order = await Order.findByIdAndUpdate(id, { status, previousStatus: status });
-        if (status === 'Returned' && order) {
-            await User.findOneAndUpdate({ email: order.userEmail }, { isBlocked: true });
-        }
-        res.redirect('back');
+        
+        let redirectTab = 'pending';
+        if (status === 'Confirmed') redirectTab = 'confirmed';
+        if (status === 'Delivered') redirectTab = 'completed';
+
+        res.redirect(`/admin-dashboard?tab=${redirectTab}`);
     } catch (err) {
         next(err);
     }
