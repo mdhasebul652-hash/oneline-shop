@@ -9,12 +9,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ================= Database Connection (MongoDB Atlas) =================
+
 const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://hasebul:hasebul1234@hasebul.v1tb47m.mongodb.net/?appName=hasebul';
+
 mongoose.connect(MONGO_URI)
 .then(() => console.log("MongoDB Connected Successfully"))
 .catch(err => console.log("DB Connection Error: ", err));
 
 // ================= Middlewares & Setup =================
+
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(cookieParser());
@@ -33,6 +36,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // ================= Mongoose Schemas & Models =================
+
 const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
@@ -65,7 +69,8 @@ const orderSchema = new mongoose.Schema({
     senderNumber: String,
     paidAmount: Number,
     trxId: String,
-    status: { type: String, default: 'Pending' },
+    status: { type: String, default: 'Pending' }, // Pending, Confirmed, Delivered, Trash
+    previousStatus: { type: String, default: 'Pending' }, // To restore when coming out of Trash
     createdAt: { type: Date, default: Date.now }
 });
 const Order = mongoose.model('Order', orderSchema);
@@ -84,6 +89,7 @@ const fbContentSchema = new mongoose.Schema({
     title: String,
     mediaUrl: String, 
     mediaType: String,
+    productLink: { type: String, default: '/' }, 
     createdAt: { type: Date, default: Date.now }
 });
 const FbContent = mongoose.model('FbContent', fbContentSchema);
@@ -103,29 +109,25 @@ app.use(async (req, res, next) => {
 });
 
 // ================= Daraj-Style Global CSS & Layout =================
+
 const globalHeaderHTML = `
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
         * { box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0 0 65px 0; background: #f4f4f4; color: #222; -webkit-text-size-adjust: 100%; }
         
-        /* Top Header - Daraj Look */
         header { background: #f85606; color: white; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 1000; box-shadow: 0 2px 5px rgba(0,0,0,0.1); width: 100%; }
         .logo { font-size: 18px; font-weight: bold; text-decoration: none; color: white; white-space: nowrap; }
         
         .search-bar { display: flex; flex: 1; max-width: 550px; margin: 0 10px; }
         .search-bar input { width: 100%; padding: 8px 12px; border: none; border-radius: 4px 0 0 4px; outline: none; font-size: 14px; }
         .search-bar button { background: #ffe11b; border: none; padding: 0 15px; border-radius: 0 4px 4px 0; cursor: pointer; font-weight: bold; font-size: 14px; color: #333; }
-        
-        .top-nav-icons { display: flex; gap: 12px; align-items: center; }
 
-        /* Categories Horizontal Bar */
         .categories-nav { background: white; padding: 10px 15px; display: flex; gap: 10px; overflow-x: auto; box-shadow: 0 2px 4px rgba(0,0,0,0.05); white-space: nowrap; -webkit-overflow-scrolling: touch; position: sticky; top: 55px; z-index: 999; }
         .categories-nav::-webkit-scrollbar { display: none; }
         .categories-nav a { text-decoration: none; color: #333; font-size: 13px; font-weight: 500; padding: 6px 12px; background: #f0f0f0; border-radius: 20px; transition: 0.2s; }
         .categories-nav a:hover { background: #f85606; color: white; }
 
-        /* Bottom Fixed Navigation Bar (Daraj Style Mobile Nav) */
         .bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; background: #fff; display: flex; justify-content: space-around; padding: 8px 0; border-top: 1px solid #ddd; z-index: 1000; box-shadow: 0 -2px 5px rgba(0,0,0,0.05); }
         .bottom-nav a { text-decoration: none; color: #666; font-size: 11px; display: flex; flex-direction: column; align-items: center; text-align: center; font-weight: 500; }
         .bottom-nav a span { font-size: 18px; margin-bottom: 2px; }
@@ -133,7 +135,6 @@ const globalHeaderHTML = `
 
         .container { max-width: 1200px; margin: 15px auto; padding: 0 10px; width: 100%; }
         
-        /* Product Grid & Cards */
         .product-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
         .product-card { background: white; padding: 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; flex-direction: column; justify-content: space-between; text-decoration: none; color: inherit; transition: transform 0.2s; }
         
@@ -181,6 +182,7 @@ const getNavbarHTML = (user) => `
 `;
 
 // ================= Public & Homepage Routes =================
+
 app.get('/', async (req, res) => {
     let categoryFilter = req.query.category;
     let query = categoryFilter ? { category: categoryFilter } : {};
@@ -200,7 +202,7 @@ app.get('/', async (req, res) => {
         <div style="background:white; padding:15px; margin-bottom:15px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
             <p style="font-weight:bold; margin-bottom:8px;">${fb.title}</p>
             ${fb.mediaType === 'image' ? `<img src="/uploads/${fb.mediaUrl}" style="max-width:100%; height:auto; border-radius:4px;">` : `<video src="/uploads/${fb.mediaUrl}" controls style="max-width:100%; border-radius:4px;"></video>`}
-            <br><a href="/" class="btn btn-buy" style="margin-top:10px; display:inline-block;">⚡ Order Now</a>
+            <br><a href="${fb.productLink || '/'}" class="btn btn-buy" style="margin-top:10px; display:inline-block;">⚡ Order Now</a>
         </div>
     `).join('');
 
@@ -357,15 +359,16 @@ app.post('/api/chat', async (req, res) => {
 });
 
 // ================= My Orders Page =================
+
 app.get('/my-orders', async (req, res) => {
     if (!req.user) return res.redirect('/login?redirect=/my-orders');
-    let orders = await Order.find({ userEmail: req.user.email }).sort({ _id: -1 });
+    let orders = await Order.find({ userEmail: req.user.email, status: { $ne: 'Trash' } }).sort({ _id: -1 });
     
     let ordersHTML = orders.map(o => `
         <div style="background:#fff; padding:15px; margin-bottom:12px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-size:14px;">
             <p style="margin:5px 0;"><b>Order ID:</b> ${o._id}</p>
             <p style="margin:5px 0;"><b>Total Amount:</b> ৳${o.totalAmount} (${o.paymentMethod})</p>
-            <p style="margin:5px 0;"><b>Status:</b> <span style="color:${o.status === 'Delivered' ? 'green' : (o.status === 'Returned' ? 'red' : '#f85606')}; font-weight:bold;">${o.status}</span></p>
+            <p style="margin:5px 0;"><b>Status:</b> <span style="color:${o.status === 'Delivered' ? 'green' : (o.status === 'Confirmed' ? '#007bff' : '#f85606')}; font-weight:bold;">অর্ডার কনফার্ম হয়েছে / ${o.status}</span></p>
             <p style="margin:5px 0; color:#666; font-size:12px;"><b>Date:</b> ${new Date(o.createdAt).toLocaleString()}</p>
         </div>
     `).join('');
@@ -386,6 +389,7 @@ app.get('/my-orders', async (req, res) => {
 });
 
 // ================= Checkout & Order Flow =================
+
 app.get('/buy-now/:id', async (req, res) => {
     let product = await Product.findById(req.params.id);
     if (!product) return res.send('Product not found');
@@ -480,7 +484,6 @@ app.post('/api/place-order', async (req, res) => {
         return res.send(`<script>alert('COD is disabled for your account. Please pay via bKash or Nagad.'); window.history.back();</script>`);
     }
 
-    // Server-side validation for bKash/Nagad
     if ((paymentMethod === 'bKash' || paymentMethod === 'Nagad') && (!senderNumber || !paidAmount)) {
         return res.send(`<script>alert('বিকাশ বা নগদ সিলেক্ট করলে Sender Number এবং Paid Amount ঘর দুটি পূরণ করা বাধ্যতামূলক!'); window.history.back();</script>`);
     }
@@ -495,13 +498,16 @@ app.post('/api/place-order', async (req, res) => {
         paymentMethod,
         senderNumber: senderNumber || '',
         paidAmount: Number(paidAmount) || 0,
-        trxId: trxId || ''
+        trxId: trxId || '',
+        status: 'Pending',
+        previousStatus: 'Pending'
     }).save();
 
     res.send(`<script>alert('Order placed successfully!'); window.location.href='/my-orders';</script>`);
 });
 
 // ================= User Authentication & Dashboard =================
+
 app.get('/login', (req, res) => {
     let redirectUrl = req.query.redirect || '/';
     res.send(`
@@ -640,13 +646,29 @@ app.get('/cart', (req, res) => {
 });
 
 // ================= Admin Dashboard & Management =================
+
 app.get('/admin-dashboard', async (req, res) => {
     if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
 
+    let activeTab = req.query.tab || 'pending'; // pending, confirmed, completed, trash
+
     let products = await Product.find().sort({ _id: -1 });
-    let orders = await Order.find().sort({ _id: -1 });
     let chats = await Chat.find().sort({ _id: -1 });
     let users = await User.find({ role: 'user' });
+
+    // Fetching counts for badge display on tabs
+    let pendingCount = await Order.countDocuments({ status: 'Pending' });
+    let confirmedCount = await Order.countDocuments({ status: 'Confirmed' });
+    let completedCount = await Order.countDocuments({ status: 'Delivered' });
+    let trashCount = await Order.countDocuments({ status: 'Trash' });
+
+    // Filter orders based on active tab
+    let queryStatus = 'Pending';
+    if (activeTab === 'confirmed') queryStatus = 'Confirmed';
+    if (activeTab === 'completed') queryStatus = 'Delivered';
+    if (activeTab === 'trash') queryStatus = 'Trash';
+
+    let orders = await Order.find({ status: queryStatus }).sort({ _id: -1 });
 
     let lowStockCount = products.filter(p => p.stock < 5).length;
     let totalSoldItems = products.reduce((acc, p) => acc + (p.soldCount || 0), 0);
@@ -662,25 +684,39 @@ app.get('/admin-dashboard', async (req, res) => {
         </tr>
     `).join('');
 
-    let ordersHTML = orders.map(o => `
-        <tr>
-            <td>${o._id}</td>
-            <td>${o.userEmail}</td>
-            <td>৳${o.totalAmount} (${o.paymentMethod}) <br><small>Sender: ${o.senderNumber || 'N/A'}, TrxID: ${o.trxId || 'N/A'}</small></td>
-            <td>
-                <form action="/api/update-order-status" method="POST" style="display:flex; gap:4px;">
-                    <input type="hidden" name="orderId" value="${o._id}">
-                    <select name="status" style="padding:3px; font-size:12px;">
-                        <option value="Pending" ${o.status === 'Pending' ? 'selected' : ''}>Pending</option>
-                        <option value="Shipped" ${o.status === 'Shipped' ? 'selected' : ''}>Shipped</option>
-                        <option value="Delivered" ${o.status === 'Delivered' ? 'selected' : ''}>Delivered</option>
-                        <option value="Returned" ${o.status === 'Returned' ? 'selected' : ''}>Returned</option>
-                    </select>
-                    <button type="submit" class="btn" style="padding:3px 6px; font-size:11px;">Update</button>
-                </form>
-            </td>
-        </tr>
-    `).join('');
+    // Dynamic Action Buttons according to Tabs (including Trash and Restore feature)
+    let ordersHTML = orders.map(o => {
+        let actionButtons = '';
+        if (o.status === 'Pending') {
+            actionButtons = `
+                <a href="/api/change-order-status/${o._id}/Confirmed" class="btn btn-buy" style="padding:4px 8px; font-size:11px; margin-right:4px;">Confirm Order</a>
+            `;
+        } else if (o.status === 'Confirmed') {
+            actionButtons = `
+                <a href="/api/change-order-status/${o._id}/Delivered" class="btn" style="background:#28a745; padding:4px 8px; font-size:11px; margin-right:4px;">অর্ডার সম্পন্ন হয়েছে (Delivered)</a>
+            `;
+        } else if (o.status === 'Trash') {
+            actionButtons = `
+                <a href="/api/restore-order/${o._id}" class="btn" style="background:#17a2b8; padding:4px 8px; font-size:11px; margin-right:4px;">🔄 Restore (আগের জায়গায় ফেরান)</a>
+            `;
+        }
+
+        let deleteBtnLink = o.status === 'Trash' ? `/api/permanent-delete-order/${o._id}` : `/api/move-to-trash/${o._id}`;
+        let deleteBtnText = o.status === 'Trash' ? 'Permanent Delete' : 'Delete (Trash)';
+
+        return `
+            <tr>
+                <td>${o._id}</td>
+                <td>${o.userEmail}</td>
+                <td>৳${o.totalAmount} (${o.paymentMethod}) <br><small>Sender: ${o.senderNumber || 'N/A'}, TrxID: ${o.trxId || 'N/A'}</small></td>
+                <td>
+                    <div style="margin-bottom:6px;"><span style="font-weight:bold; color:${o.status === 'Delivered' ? 'green' : (o.status === 'Confirmed' ? '#007bff' : (o.status === 'Trash' ? '#6c757d' : '#f85606'))};">${o.status}</span></div>
+                    ${actionButtons}
+                    <a href="${deleteBtnLink}" class="btn" style="background:#d9534f; padding:4px 8px; font-size:11px;" onclick="return confirm('Are you sure?');">${deleteBtnText}</a>
+                </td>
+            </tr>
+        `;
+    }).join('');
 
     let usersHTML = users.map(u => `
         <tr>
@@ -755,6 +791,9 @@ app.get('/admin-dashboard', async (req, res) => {
                     <h4 style="margin-top:0;">🎬 Add Facebook Post / Reels Video</h4>
                     <form action="/api/add-fb-content" method="POST" enctype="multipart/form-data" style="display:grid; gap:8px; max-width:500px;">
                         <input type="text" name="title" placeholder="Post Title / Description" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
+                        
+                        <input type="text" name="productLink" placeholder="Product Link (e.g. /product/product-id)" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
+
                         <select name="mediaType" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
                             <option value="image">Image</option>
                             <option value="reels">Reels Video</option>
@@ -772,12 +811,32 @@ app.get('/admin-dashboard', async (req, res) => {
                     </table>
                 </div>
 
-                <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; overflow-x:auto;">
+                <!-- ORDER ICON TABS SECTION (WITH TRASH BOX) -->
+                <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
                     <h4 style="margin-top:0;">🛍️ Customer Orders Management</h4>
-                    <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
-                        <tr><th>Order ID</th><th>Customer</th><th>Details & Payment</th><th>Status Update</th></tr>
-                        ${ordersHTML.length ? ordersHTML : '<tr><td colspan="4" style="text-align:center;">No orders received yet.</td></tr>'}
-                    </table>
+                    
+                    <!-- Icon Tabs Navigation -->
+                    <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
+                        <a href="/admin-dashboard?tab=pending" class="btn" style="background:${activeTab === 'pending' ? '#f85606' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
+                            ⏳ Pending Orders (${pendingCount})
+                        </a>
+                        <a href="/admin-dashboard?tab=confirmed" class="btn" style="background:${activeTab === 'confirmed' ? '#007bff' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
+                            📦 Confirmed Orders (${confirmedCount})
+                        </a>
+                        <a href="/admin-dashboard?tab=completed" class="btn" style="background:${activeTab === 'completed' ? '#28a745' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
+                            ✅ Completed Orders (${completedCount})
+                        </a>
+                        <a href="/admin-dashboard?tab=trash" class="btn" style="background:${activeTab === 'trash' ? '#6c757d' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
+                            🗑️ Trash Box (${trashCount})
+                        </a>
+                    </div>
+
+                    <div style="overflow-x:auto;">
+                        <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
+                            <tr><th>Order ID</th><th>Customer</th><th>Details & Payment</th><th>Status & Actions</th></tr>
+                            ${ordersHTML.length ? ordersHTML : '<tr><td colspan="4" style="text-align:center; padding:20px; color:#777;">No orders found in this section.</td></tr>'}
+                        </table>
+                    </div>
                 </div>
 
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; overflow-x:auto;">
@@ -823,15 +882,58 @@ app.get('/api/delete-product/:id', async (req, res) => {
     res.redirect('/admin-dashboard');
 });
 
-app.post('/api/update-order-status', async (req, res, next) => {
+// Move order to Trash Box instead of permanent delete
+app.get('/api/move-to-trash/:id', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        const { orderId, status } = req.body;
-        let order = await Order.findByIdAndUpdate(orderId, { status });
+        let order = await Order.findById(req.params.id);
+        if (order) {
+            order.previousStatus = order.status; // Save current status before moving to trash
+            order.status = 'Trash';
+            await order.save();
+        }
+        res.redirect('back');
+    } catch (err) {
+        next(err);
+    }
+});
+
+// Restore order from Trash Box back to its previous status
+app.get('/api/restore-order/:id', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        let order = await Order.findById(req.params.id);
+        if (order) {
+            order.status = order.previousStatus || 'Pending';
+            await order.save();
+        }
+        res.redirect('back');
+    } catch (err) {
+        next(err);
+    }
+});
+
+// Permanent delete from database
+app.get('/api/permanent-delete-order/:id', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        await Order.findByIdAndDelete(req.params.id);
+        res.redirect('back');
+    } catch (err) {
+        next(err);
+    }
+});
+
+// Route to change order status between tabs (Pending -> Confirmed -> Delivered)
+app.get('/api/change-order-status/:id/:status', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        const { id, status } = req.params;
+        let order = await Order.findByIdAndUpdate(id, { status, previousStatus: status });
         if (status === 'Returned' && order) {
             await User.findOneAndUpdate({ email: order.userEmail }, { isBlocked: true });
         }
-        res.redirect('/admin-dashboard');
+        res.redirect('back');
     } catch (err) {
         next(err);
     }
@@ -850,9 +952,14 @@ app.get('/api/toggle-block/:id', async (req, res) => {
 app.post('/api/add-fb-content', upload.single('mediaFile'), async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        const { title, mediaType } = req.body;
+        const { title, mediaType, productLink } = req.body;
         const mediaUrl = req.file ? req.file.filename : '';
-        await new FbContent({ title, mediaUrl, mediaType }).save();
+        await new FbContent({ 
+            title, 
+            mediaUrl, 
+            mediaType, 
+            productLink: productLink ? productLink.trim() : '/' 
+        }).save();
         res.redirect('/admin-dashboard');
     } catch (err) {
         next(err);
@@ -871,6 +978,7 @@ app.post('/api/reply-chat', async (req, res, next) => {
 });
 
 // ================= Server Initialization =================
+
 app.listen(PORT, () => {
     console.log(`Online Shop server is running on http://localhost:${PORT}`);
 });
