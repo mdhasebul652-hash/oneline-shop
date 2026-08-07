@@ -21,7 +21,7 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Multer Storage Configuration for Images & Videos
+// Multer Storage Configuration
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, 'public/uploads');
@@ -40,8 +40,7 @@ const userSchema = new mongoose.Schema({
     name: { type: String, default: '' },
     phone: { type: String, default: '' },
     address: { type: String, default: '' },
-    isBlocked: { type: Boolean, default: false },
-    fakeOrdersCount: { type: Number, default: 0 }
+    isBlocked: { type: Boolean, default: false }
 });
 const User = mongoose.model('User', userSchema);
 
@@ -103,41 +102,53 @@ app.use(async (req, res, next) => {
     next();
 });
 
-// ================= Global Styles & Daraj-Style Layout =================
+// ================= Daraj-Style Global CSS & Layout =================
 const globalHeaderHTML = `
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
         * { box-sizing: border-box; }
-        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f4f4f4; overflow-x: hidden; }
-        header { background: #f85606; color: white; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 1000; box-shadow: 0 2px 5px rgba(0,0,0,0.1); width: 100%; }
-        .logo { font-size: 22px; font-weight: bold; text-decoration: none; color: white; white-space: nowrap; }
-        .search-bar { display: flex; flex: 1; max-width: 550px; margin: 0 15px; }
-        .search-bar input { width: 100%; padding: 10px; border: none; border-radius: 4px 0 0 4px; outline: none; font-size: 14px; }
-        .search-bar button { background: #ffe11b; border: none; padding: 0 18px; border-radius: 0 4px 4px 0; cursor: pointer; font-weight: bold; }
-        .nav-icons { display: flex; gap: 15px; align-items: center; }
-        .nav-icons a { color: white; text-decoration: none; font-size: 12px; display: flex; flex-direction: column; align-items: center; text-align: center; }
-        .categories-nav { background: white; padding: 10px 20px; display: flex; gap: 12px; overflow-x: auto; box-shadow: 0 2px 4px rgba(0,0,0,0.05); white-space: nowrap; -webkit-overflow-scrolling: touch; position: sticky; top: 60px; z-index: 999; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0 0 65px 0; background: #f4f4f4; color: #222; -webkit-text-size-adjust: 100%; }
+        
+        /* Top Header - Daraj Look */
+        header { background: #f85606; color: white; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 1000; box-shadow: 0 2px 5px rgba(0,0,0,0.1); width: 100%; }
+        .logo { font-size: 18px; font-weight: bold; text-decoration: none; color: white; white-space: nowrap; }
+        
+        .search-bar { display: flex; flex: 1; max-width: 550px; margin: 0 10px; }
+        .search-bar input { width: 100%; padding: 8px 12px; border: none; border-radius: 4px 0 0 4px; outline: none; font-size: 14px; }
+        .search-bar button { background: #ffe11b; border: none; padding: 0 15px; border-radius: 0 4px 4px 0; cursor: pointer; font-weight: bold; font-size: 14px; color: #333; }
+        
+        .top-nav-icons { display: flex; gap: 12px; align-items: center; }
+
+        /* Categories Horizontal Bar */
+        .categories-nav { background: white; padding: 10px 15px; display: flex; gap: 10px; overflow-x: auto; box-shadow: 0 2px 4px rgba(0,0,0,0.05); white-space: nowrap; -webkit-overflow-scrolling: touch; position: sticky; top: 55px; z-index: 999; }
         .categories-nav::-webkit-scrollbar { display: none; }
-        .categories-nav a { text-decoration: none; color: #333; font-size: 13px; padding: 6px 14px; background: #f0f0f0; border-radius: 4px; }
+        .categories-nav a { text-decoration: none; color: #333; font-size: 13px; font-weight: 500; padding: 6px 12px; background: #f0f0f0; border-radius: 20px; transition: 0.2s; }
         .categories-nav a:hover { background: #f85606; color: white; }
+
+        /* Bottom Fixed Navigation Bar (Daraj Style Mobile Nav) */
+        .bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; background: #fff; display: flex; justify-content: space-around; padding: 8px 0; border-top: 1px solid #ddd; z-index: 1000; box-shadow: 0 -2px 5px rgba(0,0,0,0.05); }
+        .bottom-nav a { text-decoration: none; color: #666; font-size: 11px; display: flex; flex-direction: column; align-items: center; text-align: center; font-weight: 500; }
+        .bottom-nav a span { font-size: 18px; margin-bottom: 2px; }
+        .bottom-nav a:hover, .bottom-nav a.active { color: #f85606; }
+
+        .container { max-width: 1200px; margin: 15px auto; padding: 0 10px; width: 100%; }
         
-        .container { max-width: 1200px; margin: 20px auto; padding: 0 15px; width: 100%; }
+        /* Product Grid & Cards */
+        .product-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+        .product-card { background: white; padding: 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; flex-direction: column; justify-content: space-between; text-decoration: none; color: inherit; transition: transform 0.2s; }
         
-        /* পিক্সেল অনুযায়ী রেসপন্সিভ গ্রিড এবং আকর্ষণীয় সাইজ */
-        .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 15px; }
-        .product-card { background: white; padding: 12px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; flex-direction: column; justify-content: space-between; text-decoration: none; color: inherit; transition: transform 0.2s, box-shadow 0.2s; }
-        .product-card:hover { transform: translateY(-3px); box-shadow: 0 5px 12px rgba(0,0,0,0.15); }
+        .product-card img { width: 100%; height: 160px; object-fit: cover; border-radius: 4px; }
+        .product-card h4 { font-size: 14px; color: #222; margin: 8px 0 4px 0; height: 38px; overflow: hidden; line-height: 1.3; font-weight: 600; }
+        .price { color: #f85606; font-size: 16px; font-weight: bold; margin: 4px 0; }
         
-        .product-card img { width: 100%; height: 190px; object-fit: cover; border-radius: 4px; }
-        .price { color: #f85606; font-size: 18px; font-weight: bold; margin: 8px 0; }
-        
-        .btn { background: #f85606; color: white; border: none; padding: 9px 14px; border-radius: 4px; cursor: pointer; text-decoration: none; text-align: center; display: inline-block; font-size: 14px; }
+        .btn { background: #f85606; color: white; border: none; padding: 10px 16px; border-radius: 4px; cursor: pointer; text-decoration: none; text-align: center; display: inline-block; font-size: 14px; font-weight: 600; }
         .btn-buy { background: #ffe11b; color: #333; font-weight: bold; }
 
-        @media (max-width: 480px) {
-            .product-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-            .product-card img { height: 150px; }
-            .logo { font-size: 18px; }
-            .search-bar { margin: 0 8px; }
+        @media (min-width: 768px) {
+            .product-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 15px; }
+            .product-card img { height: 190px; }
+            .bottom-nav { display: none; }
+            body { padding-bottom: 0; }
         }
     </style>
 `;
@@ -149,20 +160,23 @@ const getNavbarHTML = (user) => `
             <input type="text" name="q" placeholder="Search in Online Shop..." required>
             <button type="submit">🔍</button>
         </form>
-        <div class="nav-icons">
-            <a href="/wishlist">❤️<br>Wishlist</a>
-            <a href="/cart">🛒<br>Cart</a>
-            <a href="/my-orders">📦<br>Orders</a>
-            ${user ? `<a href="/dashboard">👤<br>Account</a>` : `<a href="/login">🔑<br>Login</a>`}
-            ${user && user.role === 'admin' ? `<a href="/admin-dashboard" style="background:#ffe11b; color:#333; padding:5px 8px; border-radius:4px; font-weight:bold; text-align:center;">⚙️<br>Admin</a>` : ''}
-        </div>
     </header>
     <div class="categories-nav">
+        <a href="/">🔥 All</a>
         <a href="/category/Fashion">👗 Fashion</a>
         <a href="/category/Electronics">💻 Electronics</a>
         <a href="/category/Groceries">🍎 Groceries</a>
         <a href="/category/Home">🏠 Home & Living</a>
         <a href="/category/Beauty">💄 Beauty & Health</a>
+    </div>
+
+    <div class="bottom-nav">
+        <a href="/"><span>🏠</span>Home</a>
+        <a href="/wishlist"><span>❤️</span>Wishlist</a>
+        <a href="/cart"><span>🛒</span>Cart</a>
+        <a href="/my-orders"><span>📦</span>Orders</a>
+        ${user ? `<a href="/dashboard"><span>👤</span>Account</a>` : `<a href="/login"><span>🔑</span>Login</a>`}
+        ${user && user.role === 'admin' ? `<a href="/admin-dashboard"><span>⚙️</span>Admin</a>` : ''}
     </div>
 `;
 
@@ -176,9 +190,9 @@ app.get('/', async (req, res) => {
     let productsHTML = products.map(p => `
         <a href="/product/${p._id}" class="product-card">
             <img src="/uploads/${p.mainImage}" alt="${p.name}">
-            <h4 style="margin:8px 0 4px 0; font-size:14px; height:38px; overflow:hidden;">${p.name}</h4>
+            <h4>${p.name}</h4>
             <div class="price">৳${p.price}</div>
-            <div style="font-size:12px; color:#888;">Stock: ${p.stock}</div>
+            <div style="font-size:11px; color:#888;">Stock: ${p.stock}</div>
         </a>
     `).join('');
 
@@ -197,10 +211,10 @@ app.get('/', async (req, res) => {
         <body>
             ${getNavbarHTML(req.user)}
             <div class="container">
-                <h2>Flash Sale & Recommended Products</h2>
-                <div class="product-grid">${productsHTML}</div>
+                <h3 style="margin: 10px 0 15px 0; font-size: 17px; color: #333;">Flash Sale & Recommended</h3>
+                <div class="product-grid">${productsHTML.length ? productsHTML : '<p style="padding:20px; background:white; text-align:center;">No products found.</p>'}</div>
                 
-                <h2 style="margin-top:35px;">Facebook Posts & Reels Highlights</h2>
+                <h3 style="margin-top:30px; font-size: 17px;">Facebook Posts & Reels Highlights</h3>
                 <div>${fbHTML}</div>
             </div>
         </body>
@@ -214,7 +228,7 @@ app.get('/category/:name', async (req, res) => {
     let productsHTML = products.map(p => `
         <a href="/product/${p._id}" class="product-card">
             <img src="/uploads/${p.mainImage}" alt="${p.name}">
-            <h4 style="margin:8px 0 4px 0; font-size:14px; height:38px; overflow:hidden;">${p.name}</h4>
+            <h4>${p.name}</h4>
             <div class="price">৳${p.price}</div>
         </a>
     `).join('');
@@ -226,8 +240,8 @@ app.get('/category/:name', async (req, res) => {
         <body>
             ${getNavbarHTML(req.user)}
             <div class="container">
-                <h2>Category: ${catName}</h2>
-                <div class="product-grid">${productsHTML.length ? productsHTML : '<p>No products found.</p>'}</div>
+                <h3 style="margin: 10px 0 15px 0;">Category: ${catName}</h3>
+                <div class="product-grid">${productsHTML.length ? productsHTML : '<div style="background:white; padding:30px; text-align:center; border-radius:6px; grid-column: span 2;"><h3>No products found.</h3><p style="color:#777; font-size:13px;">This category currently has no products available.</p></div>'}</div>
             </div>
         </body>
         </html>
@@ -249,7 +263,7 @@ app.get('/search', async (req, res) => {
     let productsHTML = products.map(p => `
         <a href="/product/${p._id}" class="product-card">
             <img src="/uploads/${p.mainImage}" alt="${p.name}">
-            <h4 style="margin:8px 0 4px 0; font-size:14px; height:38px; overflow:hidden;">${p.name}</h4>
+            <h4>${p.name}</h4>
             <div class="price">৳${p.price}</div>
         </a>
     `).join('');
@@ -261,8 +275,8 @@ app.get('/search', async (req, res) => {
         <body>
             ${getNavbarHTML(req.user)}
             <div class="container">
-                <h2>Search Results for "${keyword}"</h2>
-                <div class="product-grid">${productsHTML.length ? productsHTML : '<p>No matching products found.</p>'}</div>
+                <h3 style="margin: 10px 0 15px 0;">Search Results for "${keyword}"</h3>
+                <div class="product-grid">${productsHTML.length ? productsHTML : '<div style="background:white; padding:30px; text-align:center; border-radius:6px; grid-column: span 2;"><h3>No matching products found.</h3></div>'}</div>
             </div>
         </body>
         </html>
@@ -275,13 +289,13 @@ app.get('/product/:id', async (req, res) => {
     let chats = await Chat.find({ productId: product._id });
     let relatedProducts = await Product.find({ category: product.category, _id: { $ne: product._id } }).limit(4);
 
-    let galleryHTML = product.gallery.map(img => `<img src="/uploads/${img}" style="width:70px; height:70px; object-fit:cover; border-radius:4px; border:1px solid #ccc;">`).join('');
-    let chatsHTML = chats.map(c => `<div style="border-bottom:1px solid #eee; padding:8px 0;"><p><b>${c.userEmail}:</b> ${c.message}</p><p style="color:green; font-size:13px; margin-left:15px;"><b>Admin Reply:</b> ${c.reply || 'Pending reply'}</p></div>`).join('');
+    let galleryHTML = product.gallery.map(img => `<img src="/uploads/${img}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ccc;">`).join('');
+    let chatsHTML = chats.map(c => `<div style="border-bottom:1px solid #eee; padding:8px 0;"><p style="margin:0 0 4px 0;"><b>${c.userEmail}:</b> ${c.message}</p><p style="color:green; font-size:13px; margin:0 0 0 15px;"><b>Admin Reply:</b> ${c.reply || 'Pending reply'}</p></div>`).join('');
     
     let relatedHTML = relatedProducts.map(p => `
         <a href="/product/${p._id}" class="product-card">
             <img src="/uploads/${p.mainImage}" alt="${p.name}">
-            <h4 style="margin:8px 0 4px 0; font-size:13px; height:32px; overflow:hidden;">${p.name}</h4>
+            <h4 style="font-size:13px; height:32px;">${p.name}</h4>
             <div class="price" style="font-size:15px;">৳${p.price}</div>
         </a>
     `).join('');
@@ -292,38 +306,38 @@ app.get('/product/:id', async (req, res) => {
         <head><title>${product.name}</title>${globalHeaderHTML}</head>
         <body>
             ${getNavbarHTML(req.user)}
-            <div class="container" style="background:white; padding:25px; border-radius:6px;">
-                <div style="display:flex; gap:30px; flex-wrap:wrap;">
-                    <div>
-                        <img src="/uploads/${product.mainImage}" style="width:320px; height:320px; object-fit:cover; border-radius:6px;"><br>
-                        <div style="display:flex; gap:10px; margin-top:10px;">${galleryHTML}</div>
+            <div class="container" style="background:white; padding:15px; border-radius:6px;">
+                <div style="display:flex; gap:20px; flex-wrap:wrap;">
+                    <div style="width:100%; max-width:320px; margin:0 auto;">
+                        <img src="/uploads/${product.mainImage}" style="width:100%; height:300px; object-fit:cover; border-radius:6px;"><br>
+                        <div style="display:flex; gap:8px; margin-top:10px; overflow-x:auto;">${galleryHTML}</div>
                     </div>
-                    <div style="flex:1; min-width: 280px;">
-                        <h2>${product.name}</h2>
-                        <p><b>Category:</b> ${product.category}</p>
+                    <div style="flex:1; min-width: 260px;">
+                        <h2 style="font-size:18px; margin-top:0;">${product.name}</h2>
+                        <p style="font-size:13px; color:#666;"><b>Category:</b> ${product.category}</p>
                         <div class="price">৳${product.price}</div>
-                        <p><b>Stock Available:</b> ${product.stock}</p>
-                        <p>${product.description}</p>
+                        <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock}</p>
+                        <p style="font-size:14px; color:#440;">${product.description}</p>
                         <br>
-                        <a href="/buy-now/${product._id}" class="btn btn-buy" style="padding:12px 35px; font-size:16px;">Buy Now</a>
+                        <a href="/buy-now/${product._id}" class="btn btn-buy" style="width:100%; padding:12px; font-size:16px; text-align:center;">Buy Now</a>
                     </div>
                 </div>
                 
-                <hr style="margin:40px 0;">
+                <hr style="margin:30px 0; border:0; border-top:1px solid #eee;">
                 <h3>You May Also Like</h3>
-                <div class="product-grid" style="margin-top:15px;">${relatedHTML.length ? relatedHTML : '<p>No related products.</p>'}</div>
+                <div class="product-grid" style="margin-top:10px;">${relatedHTML.length ? relatedHTML : '<p>No related products.</p>'}</div>
 
-                <hr style="margin:40px 0;">
+                <hr style="margin:30px 0; border:0; border-top:1px solid #eee;">
                 <h3>Ask Question About This Product</h3>
                 <form action="/api/chat" method="POST">
                     <input type="hidden" name="productId" value="${product._id}">
                     <input type="hidden" name="productName" value="${product.name}">
-                    <textarea name="message" placeholder="Ask your question here..." style="width:100%; height:80px; padding:8px; border:1px solid #ccc; border-radius:4px;" required></textarea><br>
-                    <button type="submit" class="btn" style="margin-top:8px;">Send Question</button>
+                    <textarea name="message" placeholder="Ask your question here..." style="width:100%; height:70px; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea><br>
+                    <button type="submit" class="btn" style="margin-top:6px; padding:8px 14px;">Send Question</button>
                 </form>
                 <div style="margin-top:20px;">
-                    <h4>Customer Q&A:</h4>
-                    ${chatsHTML.length ? chatsHTML : '<p>No questions yet.</p>'}
+                    <h4 style="margin-bottom:10px;">Customer Q&A:</h4>
+                    ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions yet.</p>'}
                 </div>
             </div>
         </body>
@@ -348,11 +362,11 @@ app.get('/my-orders', async (req, res) => {
     let orders = await Order.find({ userEmail: req.user.email }).sort({ _id: -1 });
     
     let ordersHTML = orders.map(o => `
-        <div style="background:#fff; padding:15px; margin-bottom:15px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-            <p><b>Order ID:</b> ${o._id}</p>
-            <p><b>Total Amount:</b> ৳${o.totalAmount} (${o.paymentMethod})</p>
-            <p><b>Status:</b> <span style="color:${o.status === 'Delivered' ? 'green' : (o.status === 'Returned' ? 'red' : '#f85606')}; font-weight:bold;">${o.status}</span></p>
-            <p><b>Date:</b> ${new Date(o.createdAt).toLocaleString()}</p>
+        <div style="background:#fff; padding:15px; margin-bottom:12px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-size:14px;">
+            <p style="margin:5px 0;"><b>Order ID:</b> ${o._id}</p>
+            <p style="margin:5px 0;"><b>Total Amount:</b> ৳${o.totalAmount} (${o.paymentMethod})</p>
+            <p style="margin:5px 0;"><b>Status:</b> <span style="color:${o.status === 'Delivered' ? 'green' : (o.status === 'Returned' ? 'red' : '#f85606')}; font-weight:bold;">${o.status}</span></p>
+            <p style="margin:5px 0; color:#666; font-size:12px;"><b>Date:</b> ${new Date(o.createdAt).toLocaleString()}</p>
         </div>
     `).join('');
 
@@ -363,8 +377,8 @@ app.get('/my-orders', async (req, res) => {
         <body>
             ${getNavbarHTML(req.user)}
             <div class="container" style="max-width:800px;">
-                <h2>📦 My Orders List</h2>
-                ${ordersHTML.length ? ordersHTML : '<p>You have not placed any orders yet.</p>'}
+                <h3 style="margin-bottom:15px;">📦 My Orders List</h3>
+                ${ordersHTML.length ? ordersHTML : '<div style="background:white; padding:30px; text-align:center; border-radius:6px;"><p>You have not placed any orders yet.</p></div>'}
             </div>
         </body>
         </html>
@@ -381,7 +395,7 @@ app.get('/buy-now/:id', async (req, res) => {
     }
 
     let codOptionHTML = req.user.isBlocked ? 
-        `<p style="color:red; font-size:13px;"><b>Note:</b> Cash on Delivery is disabled for your account. Please pay via bKash/Nagad.</p>` :
+        `<p style="color:red; font-size:12px;"><b>Note:</b> Cash on Delivery is disabled for your account. Please pay via bKash/Nagad.</p>` :
         `<option value="COD">Cash on Delivery</option>`;
 
     let advanceWarning = req.user.isBlocked ? 
@@ -393,43 +407,43 @@ app.get('/buy-now/:id', async (req, res) => {
         <head><title>Checkout</title>${globalHeaderHTML}</head>
         <body>
             ${getNavbarHTML(req.user)}
-            <div class="container" style="max-width:600px; background:white; padding:25px; border-radius:6px;">
-                <h2>Checkout Order</h2>
+            <div class="container" style="max-width:600px; background:white; padding:20px; border-radius:6px;">
+                <h3 style="margin-top:0;">Checkout Order</h3>
                 ${advanceWarning}
-                <p><b>Product:</b> ${product.name}</p>
-                <p><b>Price:</b> ৳${product.price}</p>
+                <p style="font-size:14px;"><b>Product:</b> ${product.name}</p>
+                <p style="font-size:14px;"><b>Price:</b> ৳${product.price}</p>
                 <form action="/api/place-order" method="POST">
                     <input type="hidden" name="productId" value="${product._id}">
                     <input type="hidden" name="productName" value="${product.name}">
                     <input type="hidden" name="price" value="${product.price}">
                     
-                    <label>Full Name:</label><br>
-                    <input type="text" name="name" value="${req.user.name || ''}" style="width:100%; padding:8px; margin:5px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                    <label style="font-size:13px; font-weight:600;">Full Name:</label><br>
+                    <input type="text" name="name" value="${req.user.name || ''}" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
 
-                    <label>Phone Number:</label><br>
-                    <input type="text" name="phone" value="${req.user.phone || ''}" style="width:100%; padding:8px; margin:5px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                    <label style="font-size:13px; font-weight:600;">Phone Number:</label><br>
+                    <input type="text" name="phone" value="${req.user.phone || ''}" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
 
-                    <label>Delivery Address:</label><br>
-                    <textarea name="address" style="width:100%; height:60px; padding:8px; margin:5px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required>${req.user.address || ''}</textarea><br>
+                    <label style="font-size:13px; font-weight:600;">Delivery Address:</label><br>
+                    <textarea name="address" style="width:100%; height:60px; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>${req.user.address || ''}</textarea><br>
 
-                    <label>Payment Method:</label><br>
-                    <select name="paymentMethod" id="paymentMethod" style="width:100%; padding:8px; margin:5px 0 10px 0; border:1px solid #ccc; border-radius:4px;" onchange="togglePaymentFields()" required>
+                    <label style="font-size:13px; font-weight:600;">Payment Method:</label><br>
+                    <select name="paymentMethod" id="paymentMethod" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" onchange="togglePaymentFields()" required>
                         ${codOptionHTML}
                         <option value="bKash">bKash</option>
                         <option value="Nagad">Nagad</option>
                     </select><br>
 
                     <div id="onlinePaymentDiv" style="display:${req.user.isBlocked ? 'block' : 'none'}; background:#f9f9f9; padding:10px; border-radius:4px; margin-bottom:10px;">
-                        <p style="font-size:13px; color:#555;">Send money to bKash/Nagad: <b>01700000000</b></p>
-                        <label>Sender Phone Number:</label><br>
-                        <input type="text" name="senderNumber" placeholder="e.g. 01XXXXXXXXX" style="width:100%; padding:8px; margin:5px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><br>
-                        <label>Paid Amount (Tk):</label><br>
-                        <input type="number" name="paidAmount" placeholder="Amount sent" style="width:100%; padding:8px; margin:5px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><br>
-                        <label>Transaction ID (TrxID):</label><br>
-                        <input type="text" name="trxId" placeholder="Optional TrxID" style="width:100%; padding:8px; margin:5px 0 10px 0; border:1px solid #ccc; border-radius:4px;">
+                        <p style="font-size:13px; color:#555; margin:0 0 8px 0;">Send money to bKash/Nagad: <b>01700000000</b></p>
+                        <label style="font-size:12px;">Sender Phone Number:</label><br>
+                        <input type="text" name="senderNumber" placeholder="e.g. 01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
+                        <label style="font-size:12px;">Paid Amount (Tk):</label><br>
+                        <input type="number" name="paidAmount" placeholder="Amount sent" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
+                        <label style="font-size:12px;">Transaction ID (TrxID):</label><br>
+                        <input type="text" name="trxId" placeholder="Optional TrxID" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;">
                     </div>
 
-                    <button type="submit" class="btn btn-buy" style="width:100%; padding:12px; font-size:16px;">Confirm Order</button>
+                    <button type="submit" class="btn btn-buy" style="width:100%; padding:12px; font-size:16px; margin-top:5px;">Confirm Order</button>
                 </form>
             </div>
             <script>
@@ -477,15 +491,15 @@ app.get('/login', (req, res) => {
         <head><title>Login</title>${globalHeaderHTML}</head>
         <body>
             ${getNavbarHTML(req.user)}
-            <div class="container" style="max-width:350px; background:white; padding:25px; border-radius:6px; margin-top:40px; box-shadow:0 2px 5px rgba(0,0,0,0.1);">
-                <h2>Login</h2>
+            <div class="container" style="max-width:350px; background:white; padding:20px; border-radius:6px; margin-top:30px; box-shadow:0 2px 5px rgba(0,0,0,0.1);">
+                <h3 style="margin-top:0;">Login</h3>
                 <form action="/api/login" method="POST">
                     <input type="hidden" name="redirect" value="${redirectUrl}">
-                    <label>Email:</label><br>
-                    <input type="email" name="email" style="width:100%; padding:8px; margin:5px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
-                    <label>Password:</label><br>
-                    <input type="password" name="password" style="width:100%; padding:8px; margin:5px 0 15px 0; border:1px solid #ccc; border-radius:4px;" required><br>
-                    <button type="submit" class="btn" style="width:100%;">Login</button>
+                    <label style="font-size:13px; font-weight:600;">Email:</label><br>
+                    <input type="email" name="email" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
+                    <label style="font-size:13px; font-weight:600;">Password:</label><br>
+                    <input type="password" name="password" style="width:100%; padding:10px; margin:4px 0 15px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
+                    <button type="submit" class="btn" style="width:100%; padding:10px;">Login</button>
                 </form>
                 <p style="font-size:13px; text-align:center; margin-top:15px;">New user? <a href="/register">Register here</a></p>
             </div>
@@ -511,14 +525,14 @@ app.get('/register', (req, res) => {
         <head><title>Register</title>${globalHeaderHTML}</head>
         <body>
             ${getNavbarHTML(req.user)}
-            <div class="container" style="max-width:350px; background:white; padding:25px; border-radius:6px; margin-top:40px; box-shadow:0 2px 5px rgba(0,0,0,0.1);">
-                <h2>Register Account</h2>
+            <div class="container" style="max-width:350px; background:white; padding:20px; border-radius:6px; margin-top:30px; box-shadow:0 2px 5px rgba(0,0,0,0.1);">
+                <h3 style="margin-top:0;">Register Account</h3>
                 <form action="/api/register" method="POST">
-                    <label>Email:</label><br>
-                    <input type="email" name="email" style="width:100%; padding:8px; margin:5px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
-                    <label>Password:</label><br>
-                    <input type="password" name="password" style="width:100%; padding:8px; margin:5px 0 15px 0; border:1px solid #ccc; border-radius:4px;" required><br>
-                    <button type="submit" class="btn btn-buy" style="width:100%;">Register</button>
+                    <label style="font-size:13px; font-weight:600;">Email:</label><br>
+                    <input type="email" name="email" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
+                    <label style="font-size:13px; font-weight:600;">Password:</label><br>
+                    <input type="password" name="password" style="width:100%; padding:10px; margin:4px 0 15px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
+                    <button type="submit" class="btn btn-buy" style="width:100%; padding:10px;">Register</button>
                 </form>
                 <p style="font-size:13px; text-align:center; margin-top:15px;">Already have an account? <a href="/login">Login here</a></p>
             </div>
@@ -551,7 +565,7 @@ app.get('/dashboard', async (req, res) => {
     let orders = await Order.find({ userEmail: req.user.email });
     let ordersHTML = orders.map(o => `<tr><td>${o._id}</td><td>৳${o.totalAmount}</td><td>${o.paymentMethod}</td><td>${o.status}</td></tr>`).join('');
 
-    let blockStatusNotice = req.user.isBlocked ? `<p style="color:red; font-weight:bold;">Account Status: Cash on Delivery Restricted</p>` : `<p style="color:green; font-weight:bold;">Account Status: Good Standing</p>`;
+    let blockStatusNotice = req.user.isBlocked ? `<p style="color:red; font-weight:bold; font-size:13px;">Account Status: Cash on Delivery Restricted</p>` : `<p style="color:green; font-weight:bold; font-size:13px;">Account Status: Good Standing</p>`;
 
     res.send(`
         <!DOCTYPE html>
@@ -559,28 +573,30 @@ app.get('/dashboard', async (req, res) => {
         <head><title>User Dashboard</title>${globalHeaderHTML}</head>
         <body>
             ${getNavbarHTML(req.user)}
-            <div class="container" style="background:white; padding:25px; border-radius:6px;">
-                <h2>My Account Dashboard</h2>
-                <p><b>Email:</b> ${req.user.email}</p>
+            <div class="container" style="background:white; padding:20px; border-radius:6px;">
+                <h3 style="margin-top:0;">My Account Dashboard</h3>
+                <p style="font-size:14px;"><b>Email:</b> ${req.user.email}</p>
                 ${blockStatusNotice}
                 
                 <form action="/api/update-profile" method="POST" style="max-width:400px; margin-top:20px;">
-                    <h3>Update Profile Info</h3>
-                    <label>Name:</label><br>
-                    <input type="text" name="name" value="${req.user.name || ''}" style="width:100%; padding:8px; margin:5px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
-                    <label>Phone:</label><br>
-                    <input type="text" name="phone" value="${req.user.phone || ''}" style="width:100%; padding:8px; margin:5px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
-                    <label>Address:</label><br>
-                    <textarea name="address" style="width:100%; height:60px; padding:8px; margin:5px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required>${req.user.address || ''}</textarea><br>
-                    <button type="submit" class="btn">Save Profile</button>
+                    <h4 style="margin-bottom:10px;">Update Profile Info</h4>
+                    <label style="font-size:13px;">Name:</label><br>
+                    <input type="text" name="name" value="${req.user.name || ''}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
+                    <label style="font-size:13px;">Phone:</label><br>
+                    <input type="text" name="phone" value="${req.user.phone || ''}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
+                    <label style="font-size:13px;">Address:</label><br>
+                    <textarea name="address" style="width:100%; height:60px; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>${req.user.address || ''}</textarea><br>
+                    <button type="submit" class="btn" style="padding:8px 16px;">Save Profile</button>
                 </form>
-                <hr style="margin:30px 0;">
-                <h3>My Orders History</h3>
-                <table border="1" cellpadding="8" style="width:100%; border-collapse:collapse; margin-top:10px;">
-                    <tr><th>Order ID</th><th>Total</th><th>Payment</th><th>Status</th></tr>
-                    ${ordersHTML.length ? ordersHTML : '<tr><td colspan="4">No orders placed yet.</td></tr>'}
-                </table>
-                <br><a href="/logout" class="btn" style="background:#d9534f;">Logout</a>
+                <hr style="margin:25px 0; border:0; border-top:1px solid #eee;">
+                <h4 style="margin-bottom:10px;">My Orders History</h4>
+                <div style="overflow-x:auto;">
+                    <table border="1" cellpadding="8" style="width:100%; border-collapse:collapse; margin-top:5px; font-size:13px;">
+                        <tr><th>Order ID</th><th>Total</th><th>Payment</th><th>Status</th></tr>
+                        ${ordersHTML.length ? ordersHTML : '<tr><td colspan="4" style="text-align:center;">No orders placed yet.</td></tr>'}
+                    </table>
+                </div>
+                <br><a href="/logout" class="btn" style="background:#d9534f; padding:8px 16px;">Logout</a>
             </div>
         </body>
         </html>
@@ -595,11 +611,11 @@ app.post('/api/update-profile', async (req, res) => {
 });
 
 app.get('/wishlist', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><title>Wishlist</title>${globalHeaderHTML}</head><body>${getNavbarHTML(req.user)}<div class="container"><h2>❤️ My Wishlist</h2><p>Your wishlist items will appear here.</p></div></body></html>`);
+    res.send(`<!DOCTYPE html><html><head><title>Wishlist</title>${globalHeaderHTML}</head><body>${getNavbarHTML(req.user)}<div class="container" style="background:white; padding:20px; border-radius:6px; text-align:center;"><h3>❤️ My Wishlist</h3><p style="color:#777;">Your wishlist items will appear here.</p></div></body></html>`);
 });
 
 app.get('/cart', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><title>Cart</title>${globalHeaderHTML}</head><body>${getNavbarHTML(req.user)}<div class="container"><h2>🛒 Shopping Cart</h2><p>Your cart is empty.</p></div></body></html>`);
+    res.send(`<!DOCTYPE html><html><head><title>Cart</title>${globalHeaderHTML}</head><body>${getNavbarHTML(req.user)}<div class="container" style="background:white; padding:20px; border-radius:6px; text-align:center;"><h3>🛒 Shopping Cart</h3><p style="color:#777;">Your cart is empty.</p></div></body></html>`);
 });
 
 // ================= Admin Dashboard & Management =================
@@ -616,12 +632,12 @@ app.get('/admin-dashboard', async (req, res) => {
 
     let productsHTML = products.map(p => `
         <tr style="${p.stock < 5 ? 'background:#fff3cd;' : ''}">
-            <td><img src="/uploads/${p.mainImage}" width="40" height="40" style="object-fit:cover;"></td>
-            <td>${p.name} ${p.stock < 5 ? '<span style="color:red; font-size:11px;">(Low Stock!)</span>' : ''}</td>
+            <td><img src="/uploads/${p.mainImage}" width="35" height="35" style="object-fit:cover; border-radius:3px;"></td>
+            <td>${p.name} ${p.stock < 5 ? '<span style="color:red; font-size:10px;">(Low)</span>' : ''}</td>
             <td>৳${p.price}</td>
             <td>${p.stock}</td>
             <td><b>${p.soldCount || 0}</b></td>
-            <td><a href="/api/delete-product/${p._id}" class="btn" style="background:#d9534f; padding:4px 8px; font-size:12px;">Delete</a></td>
+            <td><a href="/api/delete-product/${p._id}" class="btn" style="background:#d9534f; padding:3px 6px; font-size:11px;">Delete</a></td>
         </tr>
     `).join('');
 
@@ -631,15 +647,15 @@ app.get('/admin-dashboard', async (req, res) => {
             <td>${o.userEmail}</td>
             <td>৳${o.totalAmount} (${o.paymentMethod}) <br><small>Sender: ${o.senderNumber || 'N/A'}, TrxID: ${o.trxId || 'N/A'}</small></td>
             <td>
-                <form action="/api/update-order-status" method="POST" style="display:flex; gap:5px;">
+                <form action="/api/update-order-status" method="POST" style="display:flex; gap:4px;">
                     <input type="hidden" name="orderId" value="${o._id}">
-                    <select name="status" style="padding:3px;">
+                    <select name="status" style="padding:3px; font-size:12px;">
                         <option value="Pending" ${o.status === 'Pending' ? 'selected' : ''}>Pending</option>
                         <option value="Shipped" ${o.status === 'Shipped' ? 'selected' : ''}>Shipped</option>
                         <option value="Delivered" ${o.status === 'Delivered' ? 'selected' : ''}>Delivered</option>
                         <option value="Returned" ${o.status === 'Returned' ? 'selected' : ''}>Returned</option>
                     </select>
-                    <button type="submit" class="btn" style="padding:3px 6px; font-size:12px;">Update</button>
+                    <button type="submit" class="btn" style="padding:3px 6px; font-size:11px;">Update</button>
                 </form>
             </td>
         </tr>
@@ -648,23 +664,23 @@ app.get('/admin-dashboard', async (req, res) => {
     let usersHTML = users.map(u => `
         <tr>
             <td>${u.email}</td>
-            <td>${u.isBlocked ? '<span style="color:red; font-weight:bold;">Blocked (COD Disabled)</span>' : '<span style="color:green;">Active</span>'}</td>
+            <td>${u.isBlocked ? '<span style="color:red; font-weight:bold;">Blocked</span>' : '<span style="color:green;">Active</span>'}</td>
             <td>
-                <a href="/api/toggle-block/${u._id}" class="btn" style="background:${u.isBlocked ? '#28a745' : '#d9534f'}; padding:4px 8px; font-size:12px;">
-                    ${u.isBlocked ? 'Unblock COD' : 'Block COD'}
+                <a href="/api/toggle-block/${u._id}" class="btn" style="background:${u.isBlocked ? '#28a745' : '#d9534f'}; padding:3px 6px; font-size:11px;">
+                    ${u.isBlocked ? 'Unblock' : 'Block COD'}
                 </a>
             </td>
         </tr>
     `).join('');
 
     let chatsHTML = chats.map(c => `
-        <div style="background:#f9f9f9; padding:10px; margin-bottom:10px; border-radius:4px;">
-            <p><b>Product:</b> ${c.productName} | <b>User:</b> ${c.userEmail}</p>
-            <p><b>Question:</b> ${c.message}</p>
-            <form action="/api/reply-chat" method="POST">
+        <div style="background:#f9f9f9; padding:10px; margin-bottom:10px; border-radius:4px; font-size:13px;">
+            <p style="margin:0 0 4px 0;"><b>Product:</b> ${c.productName} | <b>User:</b> ${c.userEmail}</p>
+            <p style="margin:0 0 8px 0;"><b>Question:</b> ${c.message}</p>
+            <form action="/api/reply-chat" method="POST" style="display:flex; gap:5px;">
                 <input type="hidden" name="chatId" value="${c._id}">
-                <input type="text" name="reply" value="${c.reply || ''}" placeholder="Write reply..." style="padding:6px; width:70%; border:1px solid #ccc; border-radius:4px;" required>
-                <button type="submit" class="btn" style="padding:6px 12px;">Reply</button>
+                <input type="text" name="reply" value="${c.reply || ''}" placeholder="Write reply..." style="padding:5px; flex:1; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
+                <button type="submit" class="btn" style="padding:5px 10px; font-size:12px;">Reply</button>
             </form>
         </div>
     `).join('');
@@ -676,84 +692,84 @@ app.get('/admin-dashboard', async (req, res) => {
         <body>
             ${getNavbarHTML(req.user)}
             <div class="container">
-                <h2>⚙️ Admin Control Dashboard</h2>
+                <h3 style="margin-bottom:15px;">⚙️ Admin Control Dashboard</h3>
                 
-                <div style="display:flex; gap:15px; margin:20px 0; flex-wrap:wrap;">
-                    <div style="background:white; padding:15px; border-radius:6px; flex:1; min-width:200px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-                        <h4>Total Sold Items</h4>
-                        <p style="font-size:22px; color:#f85606; font-weight:bold;">${totalSoldItems}</p>
+                <div style="display:flex; gap:12px; margin-bottom:15px; flex-wrap:wrap;">
+                    <div style="background:white; padding:12px; border-radius:6px; flex:1; min-width:140px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                        <h4 style="margin:0; font-size:13px; color:#666;">Total Sold Items</h4>
+                        <p style="font-size:20px; color:#f85606; font-weight:bold; margin:5px 0 0 0;">${totalSoldItems}</p>
                     </div>
-                    <div style="background:white; padding:15px; border-radius:6px; flex:1; min-width:200px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-                        <h4>Low Stock Alerts</h4>
-                        <p style="font-size:22px; color:red; font-weight:bold;">${lowStockCount}</p>
+                    <div style="background:white; padding:12px; border-radius:6px; flex:1; min-width:140px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                        <h4 style="margin:0; font-size:13px; color:#666;">Low Stock Alerts</h4>
+                        <p style="font-size:20px; color:red; font-weight:bold; margin:5px 0 0 0;">${lowStockCount}</p>
                     </div>
                 </div>
 
-                <div style="background:white; padding:20px; border-radius:6px; margin-top:20px;">
-                    <h3>📦 Add New Product</h3>
-                    <form action="/api/add-product" method="POST" enctype="multipart/form-data" style="display:grid; gap:10px; max-width:500px;">
-                        <input type="text" name="name" placeholder="Product Name" style="padding:8px; border:1px solid #ccc; border-radius:4px;" required>
-                        <select name="category" style="padding:8px; border:1px solid #ccc; border-radius:4px;" required>
+                <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
+                    <h4 style="margin-top:0;">📦 Add New Product</h4>
+                    <form action="/api/add-product" method="POST" enctype="multipart/form-data" style="display:grid; gap:8px; max-width:500px;">
+                        <input type="text" name="name" placeholder="Product Name" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
+                        <select name="category" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
                             <option value="Fashion">Fashion</option>
                             <option value="Electronics">Electronics</option>
                             <option value="Groceries">Groceries</option>
                             <option value="Home">Home & Living</option>
                             <option value="Beauty">Beauty & Health</option>
                         </select>
-                        <input type="number" name="price" placeholder="Price (Tk)" style="padding:8px; border:1px solid #ccc; border-radius:4px;" required>
-                        <input type="number" name="stock" placeholder="Stock Quantity" style="padding:8px; border:1px solid #ccc; border-radius:4px;" required>
-                        <textarea name="description" placeholder="Product Description" style="padding:8px; border:1px solid #ccc; border-radius:4px;"></textarea>
+                        <input type="number" name="price" placeholder="Price (Tk)" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
+                        <input type="number" name="stock" placeholder="Stock Quantity" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
+                        <textarea name="description" placeholder="Product Description" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;"></textarea>
                         
-                        <label>Main Image:</label>
-                        <input type="file" name="mainImage" accept="image/*" required>
+                        <label style="font-size:12px; font-weight:600;">Main Image:</label>
+                        <input type="file" name="mainImage" accept="image/*" style="font-size:12px;" required>
                         
-                        <label>Gallery Images (Up to 5 photos):</label>
-                        <input type="file" name="gallery" accept="image/*" multiple>
+                        <label style="font-size:12px; font-weight:600;">Gallery Images (Up to 5):</label>
+                        <input type="file" name="gallery" accept="image/*" multiple style="font-size:12px;">
                         
-                        <button type="submit" class="btn">Upload Product</button>
+                        <button type="submit" class="btn" style="padding:8px;">Upload Product</button>
                     </form>
                 </div>
 
-                <div style="background:white; padding:20px; border-radius:6px; margin-top:20px;">
-                    <h3>🎬 Add Facebook Post / Reels Video</h3>
-                    <form action="/api/add-fb-content" method="POST" enctype="multipart/form-data" style="display:grid; gap:10px; max-width:500px;">
-                        <input type="text" name="title" placeholder="Post Title / Description" style="padding:8px; border:1px solid #ccc; border-radius:4px;" required>
-                        <select name="mediaType" style="padding:8px; border:1px solid #ccc; border-radius:4px;" required>
+                <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
+                    <h4 style="margin-top:0;">🎬 Add Facebook Post / Reels Video</h4>
+                    <form action="/api/add-fb-content" method="POST" enctype="multipart/form-data" style="display:grid; gap:8px; max-width:500px;">
+                        <input type="text" name="title" placeholder="Post Title / Description" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
+                        <select name="mediaType" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
                             <option value="image">Image</option>
                             <option value="reels">Reels Video</option>
                         </select>
-                        <input type="file" name="mediaFile" accept="image/*,video/*" required>
-                        <button type="submit" class="btn">Publish FB Content</button>
+                        <input type="file" name="mediaFile" accept="image/*,video/*" style="font-size:12px;" required>
+                        <button type="submit" class="btn" style="padding:8px;">Publish FB Content</button>
                     </form>
                 </div>
 
-                <div style="background:white; padding:20px; border-radius:6px; margin-top:20px; overflow-x:auto;">
-                    <h3>📋 Manage Products & Sold Tracking</h3>
-                    <table border="1" cellpadding="8" style="width:100%; border-collapse:collapse; margin-top:10px;">
-                        <tr><th>Image</th><th>Name</th><th>Price</th><th>Stock</th><th>Sold</th><th>Action</th></tr>
+                <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; overflow-x:auto;">
+                    <h4 style="margin-top:0;">📋 Manage Products & Sold Tracking</h4>
+                    <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
+                        <tr><th>Img</th><th>Name</th><th>Price</th><th>Stock</th><th>Sold</th><th>Action</th></tr>
                         ${productsHTML}
                     </table>
                 </div>
 
-                <div style="background:white; padding:20px; border-radius:6px; margin-top:20px; overflow-x:auto;">
-                    <h3>🛍️ Customer Orders Management</h3>
-                    <table border="1" cellpadding="8" style="width:100%; border-collapse:collapse; margin-top:10px;">
+                <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; overflow-x:auto;">
+                    <h4 style="margin-top:0;">🛍️ Customer Orders Management</h4>
+                    <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
                         <tr><th>Order ID</th><th>Customer</th><th>Details & Payment</th><th>Status Update</th></tr>
-                        ${ordersHTML.length ? ordersHTML : '<tr><td colspan="4">No orders received yet.</td></tr>'}
+                        ${ordersHTML.length ? ordersHTML : '<tr><td colspan="4" style="text-align:center;">No orders received yet.</td></tr>'}
                     </table>
                 </div>
 
-                <div style="background:white; padding:20px; border-radius:6px; margin-top:20px; overflow-x:auto;">
-                    <h3>🚫 User Blocklist</h3>
-                    <table border="1" cellpadding="8" style="width:100%; border-collapse:collapse; margin-top:10px;">
+                <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; overflow-x:auto;">
+                    <h4 style="margin-top:0;">🚫 User Blocklist</h4>
+                    <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
                         <tr><th>User Email</th><th>COD Status</th><th>Action</th></tr>
-                        ${usersHTML.length ? usersHTML : '<tr><td colspan="3">No users registered yet.</td></tr>'}
+                        ${usersHTML.length ? usersHTML : '<tr><td colspan="3" style="text-align:center;">No users registered yet.</td></tr>'}
                     </table>
                 </div>
 
-                <div style="background:white; padding:20px; border-radius:6px; margin-top:20px;">
-                    <h3>💬 Customer Chatbox Inbox Queries</h3>
-                    ${chatsHTML.length ? chatsHTML : '<p>No questions asked yet.</p>'}
+                <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
+                    <h4 style="margin-top:0;">💬 Customer Chatbox Inbox Queries</h4>
+                    ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions asked yet.</p>'}
                 </div>
             </div>
         </body>
@@ -786,14 +802,18 @@ app.get('/api/delete-product/:id', async (req, res) => {
     res.redirect('/admin-dashboard');
 });
 
-app.post('/api/update-order-status', async (req, res) => {
-    if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-    const { orderId, status } = req.body;
-    let order = await Order.findByIdAndUpdate(orderId, { status });
-    if (status === 'Returned' && order) {
-        await User.findOneAndUpdate({ email: order.userEmail }, { isBlocked: true });
+app.post('/api/update-order-status', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        const { orderId, status } = req.body;
+        let order = await Order.findByIdAndUpdate(orderId, { status });
+        if (status === 'Returned' && order) {
+            await User.findOneAndUpdate({ email: order.userEmail }, { isBlocked: true });
+        }
+        res.redirect('/admin-dashboard');
+    } catch (err) {
+        next(err);
     }
-    res.redirect('/admin-dashboard');
 });
 
 app.get('/api/toggle-block/:id', async (req, res) => {
@@ -806,19 +826,27 @@ app.get('/api/toggle-block/:id', async (req, res) => {
     res.redirect('/admin-dashboard');
 });
 
-app.post('/api/add-fb-content', upload.single('mediaFile'), async (req, res) => {
-    if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-    const { title, mediaType } = req.body;
-    const mediaUrl = req.file ? req.file.filename : '';
-    await new FbContent({ title, mediaUrl, mediaType }).save();
-    res.redirect('/admin-dashboard');
+app.post('/api/add-fb-content', upload.single('mediaFile'), async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        const { title, mediaType } = req.body;
+        const mediaUrl = req.file ? req.file.filename : '';
+        await new FbContent({ title, mediaUrl, mediaType }).save();
+        res.redirect('/admin-dashboard');
+    } catch (err) {
+        next(err);
+    }
 });
 
-app.post('/api/reply-chat', async (req, res) => {
-    if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-    const { chatId, reply } = req.body;
-    await Chat.findByIdAndUpdate(chatId, { reply });
-    res.redirect('/admin-dashboard');
+app.post('/api/reply-chat', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        const { chatId, reply } = req.body;
+        await Chat.findByIdAndUpdate(chatId, { reply });
+        res.redirect('/admin-dashboard');
+    } catch (err) {
+        next(err);
+    }
 });
 
 // ================= Server Initialization =================
