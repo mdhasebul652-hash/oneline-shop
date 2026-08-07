@@ -5,30 +5,53 @@ const cookieParser = require('cookie-parser');
 const app = express();
 const PORT = 3000;
 
-// ডেটাবেস কানেকশন (আপনার নতুন ইউজার ও পাসওয়ার্ড দিয়ে আপডেট করা)
+// ডেটাবেস কানেকশন
 const dbURI = 'mongodb+srv://hasebul:hasebul1234@hasebul.v1tb47m.mongodb.net/?appName=hasebul';
 
 mongoose.connect(dbURI)
     .then(() => console.log('সফলভাবে ডেটাবেস কানেক্ট হয়েছে!'))
     .catch(err => console.log('কানেকশন এরর:', err));
 
+// ==========================================
+// MongoDB Schema & Models (স্থায়ী ডেটার জন্য)
+// ==========================================
+const userSchema = new mongoose.Schema({
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    role: { type: String, default: 'user' }
+});
+const User = mongoose.model('User', userSchema);
+
+const profileSchema = new mongoose.Schema({
+    email: { type: String, required: true, unique: true },
+    name: String,
+    phone: String,
+    address: String
+});
+const Profile = mongoose.model('Profile', profileSchema);
+
+const orderSchema = new mongoose.Schema({
+    userEmail: String,
+    productName: String,
+    price: Number,
+    shippingInfo: Object,
+    date: { type: String, default: () => new Date().toLocaleString() }
+});
+const Order = mongoose.model('Order', orderSchema);
+
+// মিডলওয়্যার
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(cookieParser());
 
-// ইন-মেমোরি ডেটাবেস
-let users = []; // { email, password, role }
-let userProfiles = {}; // email -> { name, phone, address }
+// স্ট্যাটিক প্রোডাক্ট লিস্ট
 let products = [
     { id: '1', name: 'T-Shirt', category: 'fashion', price: 500, image: 'https://via.placeholder.com/150' },
     { id: '2', name: 'Smart Watch', category: 'electronics', price: 1500, image: 'https://via.placeholder.com/150' },
     { id: '3', name: 'Book', category: 'books', price: 250, image: 'https://via.placeholder.com/150' }
 ];
-let orders = [];
-let pendingReviews = [];
-let chatMessages = [];
 
-// সিম্পল কুকি মিডলওয়্যার
+// কুকি মিডলওয়্যার
 app.use((req, res, next) => {
     const cookie = req.cookies.userSession;
     if (cookie) {
@@ -44,7 +67,7 @@ app.use((req, res, next) => {
 });
 
 // ==========================================
-// ১. হোম পেজ (লগইন ছাড়াই ক্যাটাগরি ও প্রোডাক্ট দেখা যাবে)
+// ১. হোম পেজ
 // ==========================================
 app.get('/', (req, res) => {
     let user = req.user;
@@ -92,16 +115,12 @@ app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
         <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <title>E-Commerce Home Page</title>
-        </head>
+        <head><meta charset="UTF-8"><title>E-Commerce Home Page</title></head>
         <body style="font-family:Arial, sans-serif; background:#f4f4f4; margin:0; padding:20px;">
             <div style="display:flex; justify-content:space-between; align-items:center; background:white; padding:15px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
                 <h2 style="margin:0; color:#333;">Our Shop</h2>
                 <div>${topIconsHTML}</div>
             </div>
-
             <div style="margin-top:20px; background:white; padding:10px; border-radius:8px;">
                 <strong>Category: </strong>
                 <a href="/?category=all" style="margin-right:10px; text-decoration:none; color:${selectedCategory === 'all' ? 'red' : 'blue'};">All</a>
@@ -109,7 +128,6 @@ app.get('/', (req, res) => {
                 <a href="/?category=electronics" style="margin-right:10px; text-decoration:none; color:${selectedCategory === 'electronics' ? 'red' : 'blue'};">Electronics</a>
                 <a href="/?category=books" style="margin-right:10px; text-decoration:none; color:${selectedCategory === 'books' ? 'red' : 'blue'};">Books</a>
             </div>
-
             <div style="margin-top:20px;">
                 <h3>Product List</h3>
                 <div>${productHTML}</div>
@@ -120,11 +138,12 @@ app.get('/', (req, res) => {
 });
 
 // ==========================================
-// ২. প্রোফাইল ম্যানেজমেন্ট ও অর্ডার করার লজিক
+// ২. প্রোফাইল ও অর্ডার ম্যানেজমেন্ট (ডেটাবেস যুক্ত)
 // ==========================================
-app.get('/profile', (req, res) => {
+app.get('/profile', async (req, res) => {
     if (!req.user || req.user.role !== 'user') return res.redirect('/login');
-    const profile = userProfiles[req.user.email] || { name: '', phone: '', address: '' };
+    
+    let profile = await Profile.findOne({ email: req.user.email }) || { name: '', phone: '', address: '' };
 
     res.send(`
         <!DOCTYPE html>
@@ -135,11 +154,11 @@ app.get('/profile', (req, res) => {
                 <h2>Your Profile Info</h2>
                 <form action="/api/save-profile" method="POST">
                     <label>Name:</label><br>
-                    <input type="text" name="name" value="${profile.name}" style="width:100%; padding:8px; margin:5px 0;" required><br>
+                    <input type="text" name="name" value="${profile.name || ''}" style="width:100%; padding:8px; margin:5px 0;" required><br>
                     <label>Phone Number:</label><br>
-                    <input type="text" name="phone" value="${profile.phone}" style="width:100%; padding:8px; margin:5px 0;" required><br>
+                    <input type="text" name="phone" value="${profile.phone || ''}" style="width:100%; padding:8px; margin:5px 0;" required><br>
                     <label>Delivery Address:</label><br>
-                    <textarea name="address" style="width:100%; padding:8px; margin:5px 0;" required>${profile.address}</textarea><br>
+                    <textarea name="address" style="width:100%; padding:8px; margin:5px 0;" required>${profile.address || ''}</textarea><br>
                     <button type="submit" style="background:#28a745; color:white; border:none; padding:10px 15px; border-radius:4px; cursor:pointer; width:100%;">Save Profile</button>
                 </form>
                 <br><a href="/">Go Back Home</a>
@@ -149,10 +168,16 @@ app.get('/profile', (req, res) => {
     `);
 });
 
-app.post('/api/save-profile', (req, res) => {
+app.post('/api/save-profile', async (req, res) => {
     if (!req.user || req.user.role !== 'user') return res.redirect('/login');
     const { name, phone, address } = req.body;
-    userProfiles[req.user.email] = { name, phone, address };
+
+    await Profile.findOneAndUpdate(
+        { email: req.user.email },
+        { name, phone, address },
+        { upsert: true, new: true }
+    );
+
     res.redirect('/');
 });
 
@@ -169,7 +194,6 @@ app.get('/product/:id', (req, res) => {
                 <img src="${product.image}" width="150"><br>
                 <h2>${product.name}</h2>
                 <p style="color:green; font-size:16px;">Price: ${product.price} BDT</p>
-               
                 <form action="/api/place-order" method="POST">
                     <input type="hidden" name="productId" value="${product.id}">
                     <button type="submit" style="background:#ffc107; color:black; border:none; padding:10px 20px; border-radius:4px; font-size:16px; cursor:pointer; font-weight:bold;">Buy Now</button>
@@ -181,10 +205,10 @@ app.get('/product/:id', (req, res) => {
     `);
 });
 
-app.post('/api/place-order', (req, res) => {
+app.post('/api/place-order', async (req, res) => {
     if (!req.user || req.user.role !== 'user') return res.redirect('/login');
     
-    const profile = userProfiles[req.user.email];
+    const profile = await Profile.findOne({ email: req.user.email });
     if (!profile || !profile.address || !profile.phone) {
         return res.send(`
             <script>
@@ -198,13 +222,13 @@ app.post('/api/place-order', (req, res) => {
     const product = products.find(p => p.id === productId);
 
     if (product) {
-        orders.push({
+        const newOrder = new Order({
             userEmail: req.user.email,
             productName: product.name,
             price: product.price,
-            shippingInfo: profile,
-            date: new Date().toLocaleString()
+            shippingInfo: { name: profile.name, phone: profile.phone, address: profile.address }
         });
+        await newOrder.save();
     }
 
     res.send(`
@@ -215,10 +239,10 @@ app.post('/api/place-order', (req, res) => {
     `);
 });
 
-app.get('/my-orders', (req, res) => {
+app.get('/my-orders', async (req, res) => {
     if (!req.user || req.user.role !== 'user') return res.redirect('/login');
     
-    const userOrders = orders.filter(o => o.userEmail === req.user.email);
+    const userOrders = await Order.find({ userEmail: req.user.email });
     let ordersHTML = userOrders.length > 0 ? userOrders.map(o => `
         <div style="border-bottom:1px solid #ddd; padding:10px; margin-bottom:10px;">
             <strong>Product:</strong> ${o.productName} <br>
@@ -244,7 +268,7 @@ app.get('/my-orders', (req, res) => {
 });
 
 // ==========================================
-// ৩. সাধারণ লগইন ও রেজিস্ট্রেশন রাউট
+// ৩. অথেন্টিকেশন (লগইন ও রেজিস্ট্রেশন - ডেটাবেস যুক্ত)
 // ==========================================
 app.get('/login', (req, res) => {
     res.send(`
@@ -263,9 +287,16 @@ app.get('/login', (req, res) => {
     `);
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
     let role = (email === 'admin@gmail.com' && password === '1234') ? 'admin' : 'user';
+
+    if (role === 'user') {
+        let user = await User.findOne({ email, password });
+        if (!user && !(email === 'admin@gmail.com')) {
+            return res.send(`<script>alert('Invalid email or password!'); window.location.href='/login';</script>`);
+        }
+    }
     
     res.cookie('userSession', JSON.stringify({ email, role }), { httpOnly: true });
     if (role === 'admin') {
@@ -292,10 +323,19 @@ app.get('/register', (req, res) => {
     `);
 });
 
-app.post('/api/register', (req, res) => {
-    const { email, password } = req.body;
-    users.push({ email, password, role: 'user' });
-    res.redirect('/login');
+app.post('/api/register', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.send(`<script>alert('Email already registered!'); window.location.href='/register';</script>`);
+        }
+        const newUser = new User({ email, password, role: 'user' });
+        await newUser.save();
+        res.redirect('/login');
+    } catch (err) {
+        res.send('Registration failed!');
+    }
 });
 
 app.get('/logout', (req, res) => {
