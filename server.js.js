@@ -70,7 +70,7 @@ const orderSchema = new mongoose.Schema({
     paidAmount: Number,
     trxId: String,
     status: { type: String, default: 'Pending' }, // Pending, Confirmed, Delivered, Trash
-    previousStatus: { type: String, default: 'Pending' }, // To restore when coming out of Trash
+    previousStatus: { type: String, default: 'Pending' },
     createdAt: { type: Date, default: Date.now }
 });
 const Order = mongoose.model('Order', orderSchema);
@@ -362,18 +362,17 @@ app.post('/api/chat', async (req, res) => {
 
 app.get('/my-orders', async (req, res) => {
     if (!req.user) return res.redirect('/login?redirect=/my-orders');
-    // Fetch user orders excluding Trash status so users see active progress
     let orders = await Order.find({ userEmail: req.user.email, status: { $ne: 'Trash' } }).sort({ _id: -1 });
     
     let ordersHTML = orders.map(o => {
-        let statusColor = '#f85606'; // Pending
+        let statusColor = '#f85606'; 
         let statusText = 'Pending (অর্ডার অপেক্ষমান আছে)';
         
         if (o.status === 'Confirmed') {
             statusColor = '#007bff';
             statusText = 'Confirmed (আপনার অর্ডারটি কনফার্ম করা হয়েছে)';
         } else if (o.status === 'Delivered') {
-            statusColor = '28a745';
+            statusColor = '#28a745';
             statusText = 'Completed / Delivered (আপনার অর্ডারটি সফলভাবে সম্পন্ন হয়েছে)';
         }
 
@@ -673,13 +672,11 @@ app.get('/admin-dashboard', async (req, res) => {
     let chats = await Chat.find().sort({ _id: -1 });
     let users = await User.find({ role: 'user' });
 
-    // Fetching counts for badge display on tabs
     let pendingCount = await Order.countDocuments({ status: 'Pending' });
     let confirmedCount = await Order.countDocuments({ status: 'Confirmed' });
     let completedCount = await Order.countDocuments({ status: 'Delivered' });
     let trashCount = await Order.countDocuments({ status: 'Trash' });
 
-    // Filter orders based on active tab
     let queryStatus = 'Pending';
     if (activeTab === 'confirmed') queryStatus = 'Confirmed';
     if (activeTab === 'completed') queryStatus = 'Delivered';
@@ -701,7 +698,6 @@ app.get('/admin-dashboard', async (req, res) => {
         </tr>
     `).join('');
 
-    // Dynamic Action Buttons according to Tabs (including Trash and Restore feature)
     let ordersHTML = orders.map(o => {
         let actionButtons = '';
         if (o.status === 'Pending') {
@@ -714,7 +710,7 @@ app.get('/admin-dashboard', async (req, res) => {
             `;
         } else if (o.status === 'Trash') {
             actionButtons = `
-                <a href="/api/restore-order/${o._id}" class="btn" style="background:#17a2b8; padding:4px 8px; font-size:11px; margin-right:4px;">🔄 Restore (আগের জায়গায় ফেরান)</a>
+                <a href="/api/restore-order/${o._id}" class="btn" style="background:#17a2b8; padding:4px 8px; font-size:11px; margin-right:4px;">🔄 Restore</a>
             `;
         }
 
@@ -809,7 +805,7 @@ app.get('/admin-dashboard', async (req, res) => {
                     <form action="/api/add-fb-content" method="POST" enctype="multipart/form-data" style="display:grid; gap:8px; max-width:500px;">
                         <input type="text" name="title" placeholder="Post Title / Description" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
                         
-                        <input type="text" name="productLink" placeholder="Product Link (e.g. /product/product-id)" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
+                        <input type="text" name="productLink" placeholder="Product Link (e.g. /product/ID or /)" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
 
                         <select name="mediaType" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
                             <option value="image">Image</option>
@@ -832,7 +828,6 @@ app.get('/admin-dashboard', async (req, res) => {
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
                     <h4 style="margin-top:0;">🛍️ Customer Orders Management</h4>
                     
-                    <!-- Icon Tabs Navigation -->
                     <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
                         <a href="/admin-dashboard?tab=pending" class="btn" style="background:${activeTab === 'pending' ? '#f85606' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
                             ⏳ Pending Orders (${pendingCount})
@@ -899,7 +894,6 @@ app.get('/api/delete-product/:id', async (req, res) => {
     res.redirect('/admin-dashboard');
 });
 
-// Move order to Trash Box instead of permanent delete
 app.get('/api/move-to-trash/:id', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
@@ -915,7 +909,6 @@ app.get('/api/move-to-trash/:id', async (req, res, next) => {
     }
 });
 
-// Restore order from Trash Box back to its previous status
 app.get('/api/restore-order/:id', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
@@ -932,7 +925,6 @@ app.get('/api/restore-order/:id', async (req, res, next) => {
     }
 });
 
-// Permanent delete from database
 app.get('/api/permanent-delete-order/:id', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
@@ -943,12 +935,10 @@ app.get('/api/permanent-delete-order/:id', async (req, res, next) => {
     }
 });
 
-// Route to change order status between tabs (Pending -> Confirmed -> Delivered)
 app.get('/api/change-order-status/:id/:status', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         const { id, status } = req.params;
-        let currentTab = req.query.tab || 'pending';
         
         let order = await Order.findByIdAndUpdate(id, { status, previousStatus: status });
         
@@ -975,8 +965,8 @@ app.get('/api/toggle-block/:id', async (req, res) => {
 app.post('/api/add-fb-content', upload.single('mediaFile'), async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        const { title, mediaType, productLink } = req.body;
-        const mediaUrl = req.file ? req.file.filename : '';
+        let { title, mediaType, productLink } = req.body;
+        let mediaUrl = req.file ? req.file.filename : '';
         await new FbContent({ 
             title, 
             mediaUrl, 
@@ -992,7 +982,7 @@ app.post('/api/add-fb-content', upload.single('mediaFile'), async (req, res, nex
 app.post('/api/reply-chat', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        const { chatId, reply } = req.body;
+        let { chatId, reply } = req.body;
         await Chat.findByIdAndUpdate(chatId, { reply });
         res.redirect('/admin-dashboard');
     } catch (err) {
