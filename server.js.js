@@ -429,17 +429,20 @@ app.get('/buy-now/:id', async (req, res) => {
                     <label style="font-size:13px; font-weight:600;">Payment Method:</label><br>
                     <select name="paymentMethod" id="paymentMethod" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" onchange="togglePaymentFields()" required>
                         ${codOptionHTML}
-                        <option value="bKash">bKash</option>
-                        <option value="Nagad">Nagad</option>
+                        <option value="bKash">বিকাশ (এই নাম্বারে পেমেন্ট করুন)</option>
+                        <option value="Nagad">নগদ (এই নাম্বারে পেমেন্ট করুন)</option>
                     </select><br>
 
                     <div id="onlinePaymentDiv" style="display:${req.user.isBlocked ? 'block' : 'none'}; background:#f9f9f9; padding:10px; border-radius:4px; margin-bottom:10px;">
-                        <p style="font-size:13px; color:#555; margin:0 0 8px 0;">Send money to bKash/Nagad: <b>01700000000</b></p>
-                        <label style="font-size:12px;">Sender Phone Number:</label><br>
-                        <input type="text" name="senderNumber" placeholder="e.g. 01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
-                        <label style="font-size:12px;">Paid Amount (Tk):</label><br>
-                        <input type="number" name="paidAmount" placeholder="Amount sent" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
-                        <label style="font-size:12px;">Transaction ID (TrxID):</label><br>
+                        <p style="font-size:13px; color:#555; margin:0 0 8px 0;">এই নাম্বারে পেমেন্ট করুন: <b>01700000000</b></p>
+                        
+                        <label style="font-size:12px;">Sender Phone Number <span style="color:red;">*</span>:</label><br>
+                        <input type="text" name="senderNumber" id="senderNumber" placeholder="e.g. 01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
+                        
+                        <label style="font-size:12px;">Paid Amount (Tk) <span style="color:red;">*</span>:</label><br>
+                        <input type="number" name="paidAmount" id="paidAmount" placeholder="Amount sent" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
+                        
+                        <label style="font-size:12px;">Transaction ID (TrxID - Optional):</label><br>
                         <input type="text" name="trxId" placeholder="Optional TrxID" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;">
                     </div>
 
@@ -450,7 +453,18 @@ app.get('/buy-now/:id', async (req, res) => {
                 function togglePaymentFields() {
                     let method = document.getElementById('paymentMethod').value;
                     let div = document.getElementById('onlinePaymentDiv');
-                    div.style.display = (method === 'bKash' || method === 'Nagad') ? 'block' : 'none';
+                    let senderInput = document.getElementById('senderNumber');
+                    let amountInput = document.getElementById('paidAmount');
+
+                    if (method === 'bKash' || method === 'Nagad') {
+                        div.style.display = 'block';
+                        senderInput.setAttribute('required', 'true');
+                        amountInput.setAttribute('required', 'true');
+                    } else {
+                        div.style.display = 'none';
+                        senderInput.removeAttribute('required');
+                        amountInput.removeAttribute('required');
+                    }
                 }
             </script>
         </body>
@@ -464,6 +478,11 @@ app.post('/api/place-order', async (req, res) => {
 
     if (req.user.isBlocked && paymentMethod === 'COD') {
         return res.send(`<script>alert('COD is disabled for your account. Please pay via bKash or Nagad.'); window.history.back();</script>`);
+    }
+
+    // Server-side validation for bKash/Nagad
+    if ((paymentMethod === 'bKash' || paymentMethod === 'Nagad') && (!senderNumber || !paidAmount)) {
+        return res.send(`<script>alert('বিকাশ বা নগদ সিলেক্ট করলে Sender Number এবং Paid Amount ঘর দুটি পূরণ করা বাধ্যতামূলক!'); window.history.back();</script>`);
     }
 
     await User.findByIdAndUpdate(req.user._id, { name, phone, address });
