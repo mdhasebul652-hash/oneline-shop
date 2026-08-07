@@ -64,12 +64,15 @@ const Product = mongoose.model('Product', productSchema);
 const orderSchema = new mongoose.Schema({
     userEmail: String,
     items: Array,
+    productPrice: Number,
+    deliveryCharge: Number,
     totalAmount: Number,
+    deliveryArea: String,
     paymentMethod: String,
     senderNumber: String,
     paidAmount: Number,
     trxId: String,
-    status: { type: String, default: 'Pending' }, // Pending, Confirmed, Delivered, Trash
+    status: { type: String, default: 'Pending' }, 
     previousStatus: { type: String, default: 'Pending' },
     createdAt: { type: Date, default: Date.now }
 });
@@ -358,7 +361,7 @@ app.post('/api/chat', async (req, res) => {
     res.redirect('back');
 });
 
-// ================= My Orders Page (With Status Tracking for Users) =================
+// ================= My Orders Page (With Status Tracking & Cancel Option) =================
 
 app.get('/my-orders', async (req, res) => {
     if (!req.user) return res.redirect('/login?redirect=/my-orders');
@@ -374,17 +377,25 @@ app.get('/my-orders', async (req, res) => {
         } else if (o.status === 'Delivered') {
             statusColor = '#28a745';
             statusText = 'Completed / Delivered (আপনার অর্ডারটি সফলভাবে সম্পন্ন হয়েছে)';
+        } else if (o.status === 'Cancelled') {
+            statusColor = '#dc3545';
+            statusText = 'Cancelled (অর্ডারটি বাতিল করা হয়েছে)';
         }
 
         let itemsList = o.items.map(i => `${i.productName} (৳${i.price})`).join(', ');
+
+        let cancelBtn = (o.status === 'Pending') ? `
+            <a href="/api/cancel-order/${o._id}" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px; margin-top:8px; display:inline-block;" onclick="return confirm('Are you sure you want to cancel this order?');">❌ Cancel Order</a>
+        ` : '';
 
         return `
             <div style="background:#fff; padding:15px; margin-bottom:12px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-size:14px;">
                 <p style="margin:5px 0;"><b>Order ID:</b> ${o._id}</p>
                 <p style="margin:5px 0;"><b>Items:</b> ${itemsList}</p>
-                <p style="margin:5px 0;"><b>Total Amount:</b> ৳${o.totalAmount} (${o.paymentMethod})</p>
+                <p style="margin:5px 0;"><b>Price:</b> ৳${o.productPrice || (o.totalAmount - (o.deliveryCharge || 0))} + Delivery: ৳${o.deliveryCharge || 0} (${o.deliveryArea || 'N/A'}) = <b style="color:#f85606;">৳${o.totalAmount}</b> (${o.paymentMethod})</p>
                 <p style="margin:5px 0;"><b>Status Update:</b> <span style="color:${statusColor}; font-weight:bold;">${statusText}</span></p>
                 <p style="margin:5px 0; color:#666; font-size:12px;"><b>Date:</b> ${new Date(o.createdAt).toLocaleString()}</p>
+                ${cancelBtn}
             </div>
         `;
     }).join('');
@@ -404,7 +415,26 @@ app.get('/my-orders', async (req, res) => {
     `);
 });
 
-// ================= Checkout & Order Flow =================
+app.get('/api/cancel-order/:id', async (req, res, next) => {
+    try {
+        if (!req.user) return res.redirect('/login');
+        let order = await Order.findOne({ _id: req.params.id, userEmail: req.user.email });
+        if (order && order.status === 'Pending') {
+            order.status = 'Cancelled';
+            order.previousStatus = 'Cancelled';
+            await order.save();
+
+            for (let item of order.items) {
+                await Product.findByIdAndUpdate(item.productId, { $inc: { stock: 1, soldCount: -1 } });
+            }
+        }
+        res.redirect('/my-orders');
+    } catch (err) {
+        next(err);
+    }
+});
+
+// ================= Checkout & Order Flow (Distance & Zone Based Delivery Charge) =================
 
 app.get('/buy-now/:id', async (req, res) => {
     let product = await Product.findById(req.params.id);
@@ -431,7 +461,8 @@ app.get('/buy-now/:id', async (req, res) => {
                 <h3 style="margin-top:0;">Checkout Order</h3>
                 ${advanceWarning}
                 <p style="font-size:14px;"><b>Product:</b> ${product.name}</p>
-                <p style="font-size:14px;"><b>Price:</b> ৳${product.price}</p>
+                <p style="font-size:14px;"><b>Product Price:</b> ৳<span id="productPrice">${product.price}</span></p>
+                
                 <form action="/api/place-order" method="POST">
                     <input type="hidden" name="productId" value="${product._id}">
                     <input type="hidden" name="productName" value="${product.name}">
@@ -443,33 +474,67 @@ app.get('/buy-now/:id', async (req, res) => {
                     <label style="font-size:13px; font-weight:600;">Phone Number:</label><br>
                     <input type="text" name="phone" value="${req.user.phone || ''}" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
 
+                    <label style="font-size:13px; font-weight:600;">Delivery Area / Location (ডেলিভারি জোন সিলেক্ট করুন):</label><br>
+                    <select name="deliveryArea" id="deliveryArea" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" onchange="calculateTotal()" required>
+                        <option value="Local Town">লোকাল টাউন / একই শহর (Local / Same City) - ৳60</option>
+                        <option value="Inside Dhaka">ঢাকার ভেতরে (Inside Dhaka) - ৳120</option>
+                        <option value="Outside Dhaka">ঢাকার বাইরে / অন্যান্য জেলা (Outside Dhaka) - ৳150</option>
+                    </select><br>
+
                     <label style="font-size:13px; font-weight:600;">Delivery Address:</label><br>
                     <textarea name="address" style="width:100%; height:60px; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>${req.user.address || ''}</textarea><br>
+
+                    <div style="background:#f0f8ff; padding:12px; border-radius:4px; margin-bottom:12px; font-size:14px; border:1px solid #bce8f1;">
+                        <p style="margin:2px 0;">Product Price: ৳${product.price}</p>
+                        <p style="margin:2px 0;">Delivery Charge: ৳<span id="deliveryChargeText">60</span></p>
+                        <hr style="border:0; border-top:1px solid #ccc; margin:6px 0;">
+                        <p style="margin:2px 0; font-weight:bold; color:#f85606; font-size:16px;">Total Payable Amount: ৳<span id="totalAmountText">${product.price + 60}</span></p>
+                    </div>
 
                     <label style="font-size:13px; font-weight:600;">Payment Method:</label><br>
                     <select name="paymentMethod" id="paymentMethod" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" onchange="togglePaymentFields()" required>
                         ${codOptionHTML}
-                        <option value="bKash">বিকাশ (এই নাম্বারে পেমেন্ট করুন)</option>
-                        <option value="Nagad">নগদ (এই নাম্বারে পেমেন্ট করুন)</option>
+                        <option value="bKash">বিকাশ (বিকাশ পার্সোনাল পেমেন্ট)</option>
+                        <option value="Nagad">নগদ (নগদ পার্সোনাল পেমেন্ট)</option>
                     </select><br>
 
-                    <div id="onlinePaymentDiv" style="display:${req.user.isBlocked ? 'block' : 'none'}; background:#f9f9f9; padding:10px; border-radius:4px; margin-bottom:10px;">
-                        <p style="font-size:13px; color:#555; margin:0 0 8px 0;">এই নাম্বারে পেমেন্ট করুন: <b>01700000000</b></p>
+                    <div id="onlinePaymentDiv" style="display:${req.user.isBlocked ? 'block' : 'none'}; background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:10px; border:1px dashed #f85606;">
+                        <p style="font-size:13px; color:#333; margin:0 0 6px 0;">আমাদের মার্চেন্ট/পার্সোনাল নাম্বারে টাকা পাঠান: <b style="color:#f85606; font-size:15px;">01700000000</b></p>
+                        <p style="font-size:11px; color:#666; margin:0 0 10px 0;">ডেলিভারি চার্জসহ মোট টাকা পাঠিয়ে আপনার মোবাইল নাম্বার ও টাকার পরিমাণ নিচে দিন এবং 'Order Now' চাপুন।</p>
                         
-                        <label style="font-size:12px;">Sender Phone Number <span style="color:red;">*</span>:</label><br>
-                        <input type="text" name="senderNumber" id="senderNumber" placeholder="e.g. 01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
+                        <label style="font-size:12px; font-weight:600;">আপনার বিকাশ/নগদ একাউন্ট নাম্বার <span style="color:red;">*</span>:</label><br>
+                        <input type="text" name="senderNumber" id="senderNumber" placeholder="যেমন: 01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
                         
-                        <label style="font-size:12px;">Paid Amount (Tk) <span style="color:red;">*</span>:</label><br>
-                        <input type="number" name="paidAmount" id="paidAmount" placeholder="Amount sent" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
+                        <label style="font-size:12px; font-weight:600;">প্রেরিত টাকার পরিমাণ (টাকা) <span style="color:red;">*</span>:</label><br>
+                        <input type="number" name="paidAmount" id="paidAmount" placeholder="যেমন: মোট টাকা" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
                         
-                        <label style="font-size:12px;">Transaction ID (TrxID - Optional):</label><br>
-                        <input type="text" name="trxId" placeholder="Optional TrxID" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;">
+                        <label style="font-size:12px; font-weight:600;">ট্রানজেকশন আইডি (TrxID - ঐচ্ছিক):</label><br>
+                        <input type="text" name="trxId" placeholder="যেমন: 9N7A6..." style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;">
                     </div>
 
-                    <button type="submit" class="btn btn-buy" style="width:100%; padding:12px; font-size:16px; margin-top:5px;">Confirm Order</button>
+                    <button type="submit" class="btn btn-buy" style="width:100%; padding:12px; font-size:16px; margin-top:5px;">⚡ Order Now</button>
                 </form>
             </div>
             <script>
+                function calculateTotal() {
+                    let productPrice = Number(document.getElementById('productPrice').innerText);
+                    let area = document.getElementById('deliveryArea').value;
+                    let deliveryCharge = 60;
+
+                    if (area === 'Inside Dhaka') {
+                        deliveryCharge = 120;
+                    } else if (area === 'Outside Dhaka') {
+                        deliveryCharge = 150;
+                    } else {
+                        deliveryCharge = 60; // Local / Same City
+                    }
+
+                    let total = productPrice + deliveryCharge;
+
+                    document.getElementById('deliveryChargeText').innerText = deliveryCharge;
+                    document.getElementById('totalAmountText').innerText = total;
+                }
+
                 function togglePaymentFields() {
                     let method = document.getElementById('paymentMethod').value;
                     let div = document.getElementById('onlinePaymentDiv');
@@ -494,7 +559,7 @@ app.get('/buy-now/:id', async (req, res) => {
 
 app.post('/api/place-order', async (req, res) => {
     if (!req.user) return res.redirect('/login');
-    const { productId, productName, price, name, phone, address, paymentMethod, senderNumber, paidAmount, trxId } = req.body;
+    const { productId, productName, price, name, phone, address, deliveryArea, paymentMethod, senderNumber, paidAmount, trxId } = req.body;
 
     if (req.user.isBlocked && paymentMethod === 'COD') {
         return res.send(`<script>alert('COD is disabled for your account. Please pay via bKash or Nagad.'); window.history.back();</script>`);
@@ -504,13 +569,23 @@ app.post('/api/place-order', async (req, res) => {
         return res.send(`<script>alert('বিকাশ বা নগদ সিলেক্ট করলে Sender Number এবং Paid Amount ঘর দুটি পূরণ করা বাধ্যতামূলক!'); window.history.back();</script>`);
     }
 
+    let deliveryCharge = 60;
+    if (deliveryArea === 'Inside Dhaka') deliveryCharge = 120;
+    else if (deliveryArea === 'Outside Dhaka') deliveryCharge = 150;
+
+    let productPrice = Number(price);
+    let totalAmount = productPrice + deliveryCharge;
+
     await User.findByIdAndUpdate(req.user._id, { name, phone, address });
     await Product.findByIdAndUpdate(productId, { $inc: { stock: -1, soldCount: 1 } });
 
     await new Order({
         userEmail: req.user.email,
-        items: [{ productId, productName, price }],
-        totalAmount: Number(price),
+        items: [{ productId, productName, price: productPrice }],
+        productPrice,
+        deliveryCharge,
+        totalAmount,
+        deliveryArea,
         paymentMethod,
         senderNumber: senderNumber || '',
         paidAmount: Number(paidAmount) || 0,
@@ -519,7 +594,7 @@ app.post('/api/place-order', async (req, res) => {
         previousStatus: 'Pending'
     }).save();
 
-    res.send(`<script>alert('Order placed successfully!'); window.location.href='/my-orders';</script>`);
+    res.send(`<script>alert('Order placed successfully with Distance-Based Delivery Charge!'); window.location.href='/my-orders';</script>`);
 });
 
 // ================= User Authentication & Dashboard =================
@@ -666,7 +741,7 @@ app.get('/cart', (req, res) => {
 app.get('/admin-dashboard', async (req, res) => {
     if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
 
-    let activeTab = req.query.tab || 'pending'; // pending, confirmed, completed, trash
+    let activeTab = req.query.tab || 'pending'; 
 
     let products = await Product.find().sort({ _id: -1 });
     let chats = await Chat.find().sort({ _id: -1 });
@@ -675,11 +750,13 @@ app.get('/admin-dashboard', async (req, res) => {
     let pendingCount = await Order.countDocuments({ status: 'Pending' });
     let confirmedCount = await Order.countDocuments({ status: 'Confirmed' });
     let completedCount = await Order.countDocuments({ status: 'Delivered' });
+    let cancelledCount = await Order.countDocuments({ status: 'Cancelled' });
     let trashCount = await Order.countDocuments({ status: 'Trash' });
 
     let queryStatus = 'Pending';
     if (activeTab === 'confirmed') queryStatus = 'Confirmed';
     if (activeTab === 'completed') queryStatus = 'Delivered';
+    if (activeTab === 'cancelled') queryStatus = 'Cancelled';
     if (activeTab === 'trash') queryStatus = 'Trash';
 
     let orders = await Order.find({ status: queryStatus }).sort({ _id: -1 });
@@ -694,7 +771,10 @@ app.get('/admin-dashboard', async (req, res) => {
             <td>৳${p.price}</td>
             <td>${p.stock}</td>
             <td><b>${p.soldCount || 0}</b></td>
-            <td><a href="/api/delete-product/${p._id}" class="btn" style="background:#d9534f; padding:3px 6px; font-size:11px;">Delete</a></td>
+            <td style="white-space:nowrap;">
+                <a href="/admin/edit-product/${p._id}" class="btn" style="background:#007bff; padding:3px 6px; font-size:11px; margin-right:4px;">✏️ Edit</a>
+                <a href="/api/delete-product/${p._id}" class="btn" style="background:#d9534f; padding:3px 6px; font-size:11px;" onclick="return confirm('Delete this product?');">Delete</a>
+            </td>
         </tr>
     `).join('');
 
@@ -721,9 +801,13 @@ app.get('/admin-dashboard', async (req, res) => {
             <tr>
                 <td>${o._id}</td>
                 <td>${o.userEmail}</td>
-                <td>৳${o.totalAmount} (${o.paymentMethod}) <br><small>Sender: ${o.senderNumber || 'N/A'}, TrxID: ${o.trxId || 'N/A'}</small></td>
                 <td>
-                    <div style="margin-bottom:6px;"><span style="font-weight:bold; color:${o.status === 'Delivered' ? 'green' : (o.status === 'Confirmed' ? '#007bff' : (o.status === 'Trash' ? '#6c757d' : '#f85606'))};">${o.status}</span></div>
+                    <b>Area:</b> ${o.deliveryArea || 'N/A'} <br>
+                    <b>Price:</b> ৳${o.productPrice || (o.totalAmount - (o.deliveryCharge || 0))} + Delivery: ৳${o.deliveryCharge || 0} = <b>৳${o.totalAmount}</b> (${o.paymentMethod})<br>
+                    <small>Sender: ${o.senderNumber || 'N/A'}, Paid: ৳${o.paidAmount || 0}, TrxID: ${o.trxId || 'N/A'}</small>
+                </td>
+                <td>
+                    <div style="margin-bottom:6px;"><span style="font-weight:bold; color:${o.status === 'Delivered' ? 'green' : (o.status === 'Confirmed' ? '#007bff' : (o.status === 'Cancelled' ? '#dc3545' : (o.status === 'Trash' ? '#6c757d' : '#f85606')))}">${o.status}</span></div>
                     ${actionButtons}
                     <a href="${deleteBtnLink}" class="btn" style="background:#d9534f; padding:4px 8px; font-size:11px;" onclick="return confirm('Are you sure?');">${deleteBtnText}</a>
                 </td>
@@ -817,29 +901,31 @@ app.get('/admin-dashboard', async (req, res) => {
                 </div>
 
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; overflow-x:auto;">
-                    <h4 style="margin-top:0;">📋 Manage Products & Sold Tracking</h4>
+                    <h4 style="margin-top:0;">📋 Manage Products & Sold Tracking (Price & Stock Edit)</h4>
                     <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
                         <tr><th>Img</th><th>Name</th><th>Price</th><th>Stock</th><th>Sold</th><th>Action</th></tr>
                         ${productsHTML}
                     </table>
                 </div>
 
-                <!-- ORDER ICON TABS SECTION (WITH TRASH BOX) -->
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
                     <h4 style="margin-top:0;">🛍️ Customer Orders Management</h4>
                     
                     <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
                         <a href="/admin-dashboard?tab=pending" class="btn" style="background:${activeTab === 'pending' ? '#f85606' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
-                            ⏳ Pending Orders (${pendingCount})
+                            ⏳ Pending (${pendingCount})
                         </a>
                         <a href="/admin-dashboard?tab=confirmed" class="btn" style="background:${activeTab === 'confirmed' ? '#007bff' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
-                            📦 Confirmed Orders (${confirmedCount})
+                            📦 Confirmed (${confirmedCount})
                         </a>
                         <a href="/admin-dashboard?tab=completed" class="btn" style="background:${activeTab === 'completed' ? '#28a745' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
-                            ✅ Completed Orders (${completedCount})
+                            ✅ Completed (${completedCount})
+                        </a>
+                        <a href="/admin-dashboard?tab=cancelled" class="btn" style="background:${activeTab === 'cancelled' ? '#dc3545' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
+                            ❌ Cancelled (${cancelledCount})
                         </a>
                         <a href="/admin-dashboard?tab=trash" class="btn" style="background:${activeTab === 'trash' ? '#6c757d' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">
-                            🗑️ Trash Box (${trashCount})
+                            🗑️ Trash (${trashCount})
                         </a>
                     </div>
 
@@ -867,6 +953,77 @@ app.get('/admin-dashboard', async (req, res) => {
         </body>
         </html>
     `);
+});
+
+// ================= Product Edit Routes =================
+
+app.get('/admin/edit-product/:id', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        let product = await Product.findById(req.params.id);
+        if (!product) return res.send('Product not found');
+
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head><title>Edit Product - ${product.name}</title>${globalHeaderHTML}</head>
+            <body>
+                ${getNavbarHTML(req.user)}
+                <div class="container" style="max-width:600px; background:white; padding:20px; border-radius:6px;">
+                    <h3 style="margin-top:0;">✏️ Edit Product Information</h3>
+                    <form action="/api/update-product/${product._id}" method="POST" style="display:grid; gap:10px;">
+                        <label style="font-size:13px; font-weight:600;">Product Name:</label>
+                        <input type="text" name="name" value="${product.name}" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>
+
+                        <label style="font-size:13px; font-weight:600;">Category:</label>
+                        <select name="category" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>
+                            <option value="Fashion" ${product.category === 'Fashion' ? 'selected' : ''}>Fashion</option>
+                            <option value="Electronics" ${product.category === 'Electronics' ? 'selected' : ''}>Electronics</option>
+                            <option value="Groceries" ${product.category === 'Groceries' ? 'selected' : ''}>Groceries</option>
+                            <option value="Home" ${product.category === 'Home' ? 'selected' : ''}>Home & Living</option>
+                            <option value="Beauty" ${product.category === 'Beauty' ? 'selected' : ''}>Beauty & Health</option>
+                        </select>
+
+                        <label style="font-size:13px; font-weight:600;">Price (Tk) - দাম কমান বা বাড়ান:</label>
+                        <input type="number" name="price" value="${product.price}" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>
+
+                        <label style="font-size:13px; font-weight:600;">Stock Quantity:</label>
+                        <input type="number" name="stock" value="${product.stock}" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>
+
+                        <label style="font-size:13px; font-weight:600;">Description:</label>
+                        <textarea name="description" style="padding:9px; height:80px; border:1px solid #ccc; border-radius:4px; font-size:14px;">${product.description}</textarea>
+
+                        <div style="display:flex; gap:10px; margin-top:10px;">
+                            <button type="submit" class="btn" style="flex:1; padding:10px;">Save Changes</button>
+                            <a href="/admin-dashboard" class="btn" style="background:#6c757d; text-align:center; padding:10px; flex:1; text-decoration:none;">Cancel</a>
+                        </div>
+                    </form>
+                </div>
+            </body>
+            </html>
+        `);
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.post('/api/update-product/:id', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        const { name, category, price, stock, description } = req.body;
+
+        await Product.findByIdAndUpdate(req.params.id, {
+            name,
+            category,
+            price: Number(price),
+            stock: Number(stock),
+            description
+        });
+
+        res.send(`<script>alert('Product updated successfully!'); window.location.href='/admin-dashboard';</script>`);
+    } catch (err) {
+        next(err);
+    }
 });
 
 app.post('/api/add-product', upload.fields([{ name: 'mainImage', maxCount: 1 }, { name: 'gallery', maxCount: 5 }]), async (req, res) => {
@@ -914,7 +1071,11 @@ app.get('/api/restore-order/:id', async (req, res, next) => {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         let order = await Order.findById(req.params.id);
         if (order) {
-            let targetTab = (order.previousStatus === 'Confirmed') ? 'confirmed' : (order.previousStatus === 'Delivered' ? 'completed' : 'pending');
+            let targetTab = 'pending';
+            if (order.previousStatus === 'Confirmed') targetTab = 'confirmed';
+            else if (order.previousStatus === 'Delivered') targetTab = 'completed';
+            else if (order.previousStatus === 'Cancelled') targetTab = 'cancelled';
+
             order.status = order.previousStatus || 'Pending';
             await order.save();
             return res.redirect(`/admin-dashboard?tab=${targetTab}`);
