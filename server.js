@@ -4,6 +4,8 @@ const cookieParser = require('cookie-parser');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const path = require('path');
+const fs = require('fs');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -20,16 +22,25 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Ensure uploads directory exists safely
+const uploadDir = path.join(__dirname, 'public', 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+
 // Multer Storage Configuration
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, 'public/uploads');
+        cb(null, uploadDir);
     },
     filename: (req, file, cb) => {
-        cb(null, Date.now() + '-' + file.originalname);
+        cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname));
     }
 });
-const upload = multer({ storage: storage });
+const upload = multer({ 
+    storage: storage,
+    limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit to prevent heavy payload crashes
+});
 
 // ================= Mongoose Schemas & Models =================
 const userSchema = new mongoose.Schema({
@@ -206,7 +217,6 @@ app.get('/', async (req, res) => {
             <div style="font-size:11px; color:#888;">Stock: ${p.stock}</div>
         </a>
     `).join('');
-
     let fbHTML = fbContents.map(fb => `
         <div style="background:white; padding:15px; margin-bottom:15px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
             <p style="font-weight:bold; margin-bottom:8px;">${fb.title}</p>
@@ -214,7 +224,6 @@ app.get('/', async (req, res) => {
             <br><a href="${fb.productLink || '/'}" class="btn btn-buy" style="margin-top:10px; display:inline-block;">⚡ Order Now (Buy Direct)</a>
         </div>
     `).join('');
-
     res.send(`
         <!DOCTYPE html>
         <html>
@@ -243,7 +252,6 @@ app.get('/category/:name', async (req, res) => {
             <div class="price">৳${p.price}</div>
         </a>
     `).join('');
-
     res.send(`
         <!DOCTYPE html>
         <html>
@@ -269,7 +277,6 @@ app.get('/search', async (req, res) => {
             { name: { $regex: searchRegex } }
         ]
     });
-
     let productsHTML = products.map(p => `
         <a href="/product/${p._id}" class="product-card">
             <img src="/uploads/${p.mainImage}" alt="${p.name}">
@@ -277,7 +284,6 @@ app.get('/search', async (req, res) => {
             <div class="price">৳${p.price}</div>
         </a>
     `).join('');
-
     res.send(`
         <!DOCTYPE html>
         <html>
@@ -299,7 +305,6 @@ app.get('/product/:id', async (req, res) => {
     let chats = await Chat.find({ productId: product._id });
     let reviews = await Review.find({ productId: product._id }).sort({ _id: -1 });
     let relatedProducts = await Product.find({ category: product.category, _id: { $ne: product._id } }).limit(4);
-
     let galleryHTML = product.gallery.map(img => `<img src="/uploads/${img}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ccc;">`).join('');
     let chatsHTML = chats.map(c => `<div style="border-bottom:1px solid #eee; padding:8px 0;"><p style="margin:0 0 4px 0;"><b>${c.userEmail}:</b> ${c.message}</p><p style="color:green; font-size:13px; margin:0 0 0 15px;"><b>Admin Reply:</b> ${c.reply || 'Pending reply'}</p></div>`).join('');
     
@@ -309,7 +314,6 @@ app.get('/product/:id', async (req, res) => {
             <p style="margin:0; color:#444;">${r.comment}</p>
         </div>
     `).join('');
-
     let relatedHTML = relatedProducts.map(p => `
         <a href="/product/${p._id}" class="product-card">
             <img src="/uploads/${p.mainImage}" alt="${p.name}">
@@ -317,7 +321,6 @@ app.get('/product/:id', async (req, res) => {
             <div class="price" style="font-size:15px;">৳${p.price}</div>
         </a>
     `).join('');
-
     res.send(`
         <!DOCTYPE html>
         <html>
@@ -412,11 +415,9 @@ app.post('/api/chat', async (req, res) => {
 app.get('/my-orders', async (req, res) => {
     if (!req.user) return res.redirect('/login?redirect=/my-orders');
     let orders = await Order.find({ userEmail: req.user.email, status: { $ne: 'Trash' } }).sort({ _id: -1 });
-
     let ordersHTML = orders.map(o => {
         let statusColor = '#f85606'; 
         let statusText = 'Pending (অর্ডার অপেক্ষমান আছে)';
-
         if (o.status === 'Confirmed') {
             statusColor = '#007bff';
             statusText = 'Confirmed (আপনার অর্ডারটি কনফার্ম করা হয়েছে)';
@@ -431,7 +432,6 @@ app.get('/my-orders', async (req, res) => {
         let cancelBtn = (o.status === 'Pending') ? `
             <a href="/api/cancel-order/${o._id}" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px; margin-top:8px; display:inline-block;" onclick="return confirm('Are you sure you want to cancel this order?');">❌ Cancel Order</a>
         ` : '';
-
         return `
             <div style="background:#fff; padding:15px; margin-bottom:12px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-size:14px;">
                 <p style="margin:5px 0;"><b>Order ID:</b> ${o._id}</p>
@@ -444,7 +444,6 @@ app.get('/my-orders', async (req, res) => {
             </div>
         `;
     }).join('');
-
     res.send(`
         <!DOCTYPE html>
         <html>
@@ -485,14 +484,11 @@ app.get('/buy-now/:id', async (req, res) => {
     if (!req.user) {
         return res.redirect('/login?redirect=/buy-now/' + product._id);
     }
-
     let codOptionHTML = req.user.isBlocked ? 
         `<p style="color:red; font-size:12px;"><b>Note:</b> Cash on Delivery is disabled for your account. Please pay via bKash/Nagad.</p>` :
         `<option value="COD">Cash on Delivery</option>`;
-
     let advanceWarning = req.user.isBlocked ? 
         `<div style="background:#fff3cd; padding:10px; border-radius:4px; margin-bottom:10px; color:#856404; font-size:13px;">⚠️ <b>Notice:</b> Please pay via bKash/Nagad to process your order.</div>` : '';
-
     res.send(`
         <!DOCTYPE html>
         <html>
@@ -643,25 +639,20 @@ app.post('/api/verify-coupon', async (req, res) => {
 app.post('/api/place-order', async (req, res) => {
     if (!req.user) return res.redirect('/login');
     const { productId, productName, price, name, phone, address, deliveryArea, discountPrice, customerNote, paymentMethod, senderNumber, paidAmount, trxId } = req.body;
-
     if (req.user.isBlocked && paymentMethod === 'COD') {
         return res.send(`<script>alert('COD is disabled for your account. Please pay via bKash or Nagad.'); window.history.back();</script>`);
     }
     if ((paymentMethod === 'bKash' || paymentMethod === 'Nagad') && (!senderNumber || !paidAmount)) {
         return res.send(`<script>alert('বিকাশ বা নগদ সিলেক্ট করলে Sender Number এবং Paid Amount ঘর দুটি পূরণ করা বাধ্যতামূলক!'); window.history.back();</script>`);
     }
-
     let deliveryCharge = 60;
     if (deliveryArea === 'Inside Dhaka') deliveryCharge = 120;
     else if (deliveryArea === 'Outside Dhaka') deliveryCharge = 150;
-
     let productPrice = Number(price);
     let discount = Number(discountPrice) || 0;
     let totalAmount = (productPrice + deliveryCharge) - discount;
-
     await User.findByIdAndUpdate(req.user._id, { name, phone, address });
     await Product.findByIdAndUpdate(productId, { $inc: { stock: -1, soldCount: 1 } });
-
     await new Order({
         userEmail: req.user.email,
         items: [{ productId, productName, price: productPrice }],
@@ -678,7 +669,6 @@ app.post('/api/place-order', async (req, res) => {
         status: 'Pending',
         previousStatus: 'Pending'
     }).save();
-
     res.send(`<script>alert('Order placed successfully!'); window.location.href='/my-orders';</script>`);
 });
 
@@ -751,12 +741,10 @@ app.post('/api/register', async (req, res) => {
     const { email, password, redirect } = req.body;
     let existing = await User.findOne({ email });
     if (existing) return res.send(`<script>alert('Email already exists!'); window.location.href='/register';</script>`);
-
     let role = (email === 'admin@onlineshop.com') ? 'admin' : 'user';
     let hashedPassword = await bcrypt.hash(password, 10);
     let newUser = new User({ email, password: hashedPassword, role });
     await newUser.save();
-
     res.cookie('userSession', JSON.stringify({ email: newUser.email, role: newUser.role }));
     res.redirect(redirect || '/dashboard');
 });
@@ -771,7 +759,6 @@ app.get('/dashboard', async (req, res) => {
     let orders = await Order.find({ userEmail: req.user.email });
     let ordersHTML = orders.map(o => `<tr><td>${o._id}</td><td>৳${o.totalAmount}</td><td>${o.paymentMethod}</td><td>${o.status}</td></tr>`).join('');
     let blockStatusNotice = req.user.isBlocked ? `<p style="color:red; font-weight:bold; font-size:13px;">Account Status: Cash on Delivery Restricted</p>` : `<p style="color:green; font-weight:bold; font-size:13px;">Account Status: Good Standing</p>`;
-
     res.send(`
         <!DOCTYPE html>
         <html>
@@ -831,31 +818,25 @@ app.get('/cart', (req, res) => {
 app.get('/admin-dashboard', async (req, res) => {
     if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
     let activeTab = req.query.tab || 'pending'; 
-
     let products = await Product.find().sort({ _id: -1 });
     let chats = await Chat.find().sort({ _id: -1 });
     let users = await User.find({ role: 'user' });
     let coupons = await Coupon.find().sort({ _id: -1 });
-
     let pendingCount = await Order.countDocuments({ status: 'Pending' });
     let confirmedCount = await Order.countDocuments({ status: 'Confirmed' });
     let completedCount = await Order.countDocuments({ status: 'Delivered' });
     let cancelledCount = await Order.countDocuments({ status: 'Cancelled' });
     let trashCount = await Order.countDocuments({ status: 'Trash' });
-
     let queryStatus = 'Pending';
     if (activeTab === 'confirmed') queryStatus = 'Confirmed';
     if (activeTab === 'completed') queryStatus = 'Delivered';
     if (activeTab === 'cancelled') queryStatus = 'Cancelled';
     if (activeTab === 'trash') queryStatus = 'Trash';
-
     let orders = await Order.find({ status: queryStatus }).sort({ _id: -1 });
     let allDeliveredOrders = await Order.find({ status: 'Delivered' });
-
     let lowStockCount = products.filter(p => p.stock < 5).length;
     let totalSoldItems = products.reduce((acc, p) => acc + (p.soldCount || 0), 0);
     let totalRevenue = allDeliveredOrders.reduce((acc, o) => acc + (o.totalAmount || 0), 0);
-
     let productsHTML = products.map(p => `
         <tr style="${p.stock < 5 ? 'background:#fff3cd;' : ''}">
             <td><img src="/uploads/${p.mainImage}" width="35" height="35" style="object-fit:cover; border-radius:3px;"></td>
@@ -869,7 +850,6 @@ app.get('/admin-dashboard', async (req, res) => {
             </td>
         </tr>
     `).join('');
-
     let couponsHTML = coupons.map(c => `
         <tr>
             <td><b>${c.code}</b></td>
@@ -877,7 +857,6 @@ app.get('/admin-dashboard', async (req, res) => {
             <td><a href="/api/delete-coupon/${c._id}" class="btn" style="background:#d9534f; padding:3px 6px; font-size:11px;" onclick="return confirm('Delete this coupon?');">Delete</a></td>
         </tr>
     `).join('');
-
     let ordersHTML = orders.map(o => {
         let actionButtons = '';
         if (o.status === 'Pending') {
@@ -889,7 +868,6 @@ app.get('/admin-dashboard', async (req, res) => {
         }
         let deleteBtnLink = o.status === 'Trash' ? `/api/permanent-delete-order/${o._id}` : `/api/move-to-trash/${o._id}`;
         let deleteBtnText = o.status === 'Trash' ? 'Permanent Delete' : 'Delete (Trash)';
-
         return `
             <tr>
                 <td>${o._id} <br><a href="/admin/invoice/${o._id}" target="_blank" style="font-size:11px; color:#007bff;">🖨️ Invoice</a></td>
@@ -908,7 +886,6 @@ app.get('/admin-dashboard', async (req, res) => {
             </tr>
         `;
     }).join('');
-
     let usersHTML = users.map(u => `
         <tr>
             <td>${u.email}</td>
@@ -920,7 +897,6 @@ app.get('/admin-dashboard', async (req, res) => {
             </td>
         </tr>
     `).join('');
-
     let chatsHTML = chats.map(c => `
         <div style="background:#f9f9f9; padding:10px; margin-bottom:10px; border-radius:4px; font-size:13px;">
             <p style="margin:0 0 4px 0;"><b>Product:</b> ${c.productName} | <b>User:</b> ${c.userEmail}</p>
@@ -932,7 +908,6 @@ app.get('/admin-dashboard', async (req, res) => {
             </form>
         </div>
     `).join('');
-
     res.send(`
         <!DOCTYPE html>
         <html>
@@ -956,7 +931,6 @@ app.get('/admin-dashboard', async (req, res) => {
                         <p style="font-size:20px; color:red; font-weight:bold; margin:5px 0 0 0;">${lowStockCount}</p>
                     </div>
                 </div>
-
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
                     <h4 style="margin-top:0;">🎟️ Create Discount Coupon Code</h4>
                     <form action="/api/add-coupon" method="POST" style="display:flex; gap:10px; max-width:500px; flex-wrap:wrap;">
@@ -971,7 +945,6 @@ app.get('/admin-dashboard', async (req, res) => {
                         </table>
                     </div>
                 </div>
-
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
                     <h4 style="margin-top:0;">📦 Add New Product</h4>
                     <form action="/api/add-product" method="POST" enctype="multipart/form-data" style="display:grid; gap:8px; max-width:500px;">
@@ -1001,7 +974,6 @@ app.get('/admin-dashboard', async (req, res) => {
                         <button type="submit" class="btn" style="padding:8px;">Upload Product</button>
                     </form>
                 </div>
-
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
                     <h4 style="margin-top:0;">🎬 Add Facebook Post / Reels Video</h4>
                     <form action="/api/add-fb-content" method="POST" enctype="multipart/form-data" style="display:grid; gap:8px; max-width:500px;">
@@ -1015,7 +987,6 @@ app.get('/admin-dashboard', async (req, res) => {
                         <button type="submit" class="btn" style="padding:8px;">Publish FB Content</button>
                     </form>
                 </div>
-
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; overflow-x:auto;">
                     <h4 style="margin-top:0;">📋 Manage Products & Sold Tracking</h4>
                     <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
@@ -1023,7 +994,6 @@ app.get('/admin-dashboard', async (req, res) => {
                         ${productsHTML}
                     </table>
                 </div>
-
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
                     <h4 style="margin-top:0;">🛍️ Customer Orders Management</h4>
                     
@@ -1041,7 +1011,6 @@ app.get('/admin-dashboard', async (req, res) => {
                         </table>
                     </div>
                 </div>
-
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; overflow-x:auto;">
                     <h4 style="margin-top:0;">🚫 User Blocklist</h4>
                     <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
@@ -1049,7 +1018,6 @@ app.get('/admin-dashboard', async (req, res) => {
                         ${usersHTML.length ? usersHTML : '<tr><td colspan="3" style="text-align:center;">No users registered yet.</td></tr>'}
                     </table>
                 </div>
-
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
                     <h4 style="margin-top:0;">💬 Customer Chatbox Inbox Queries</h4>
                     ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions asked yet.</p>'}
@@ -1087,7 +1055,6 @@ app.get('/admin/invoice/:id', async (req, res, next) => {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         let order = await Order.findById(req.params.id);
         if (!order) return res.send('Order not found');
-
         let itemsListHTML = order.items.map(i => `
             <tr>
                 <td style="padding:8px; border-bottom:1px solid #ddd;">${i.productName}</td>
@@ -1095,7 +1062,6 @@ app.get('/admin/invoice/:id', async (req, res, next) => {
                 <td style="padding:8px; border-bottom:1px solid #ddd; text-align:right;">৳${i.price}</td>
             </tr>
         `).join('');
-
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -1160,7 +1126,6 @@ app.get('/admin/edit-product/:id', async (req, res, next) => {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         let product = await Product.findById(req.params.id);
         if (!product) return res.send('Product not found');
-
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -1227,23 +1192,39 @@ app.post('/api/update-product/:id', async (req, res, next) => {
     }
 });
 
-app.post('/api/add-product', upload.fields([{ name: 'mainImage', maxCount: 1 }, { name: 'gallery', maxCount: 5 }]), async (req, res) => {
-    if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-    const { name, category, price, stock, description } = req.body;
-    const mainImage = req.files['mainImage'] ? req.files['mainImage'][0].filename : '';
-    const gallery = req.files['gallery'] ? req.files['gallery'].map(file => file.filename) : [];
-    
-    await new Product({
-        name,
-        category,
-        price: Number(price),
-        stock: Number(stock),
-        description,
-        mainImage,
-        gallery
-    }).save();
-    
-    res.redirect('/admin-dashboard');
+// FIXED PRODUCT UPLOAD ROUTE WITH SAFE NULL CHECKS
+app.post('/api/add-product', upload.fields([{ name: 'mainImage', maxCount: 1 }, { name: 'gallery', maxCount: 5 }]), async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        
+        const { name, category, price, stock, description } = req.body;
+        
+        // Safe check for uploaded files to prevent Internal Server Error crashes
+        let mainImage = '';
+        if (req.files && req.files['mainImage'] && req.files['mainImage'][0]) {
+            mainImage = req.files['mainImage'][0].filename;
+        }
+
+        let gallery = [];
+        if (req.files && req.files['gallery']) {
+            gallery = req.files['gallery'].map(file => file.filename);
+        }
+        
+        await new Product({
+            name,
+            category,
+            price: Number(price),
+            stock: Number(stock),
+            description: description || '',
+            mainImage,
+            gallery
+        }).save();
+        
+        res.redirect('/admin-dashboard');
+    } catch (err) {
+        console.error("Product upload error:", err);
+        res.send(`<script>alert('Failed to upload product. Please check input fields or image format.'); window.history.back();</script>`);
+    }
 });
 
 app.get('/api/delete-product/:id', async (req, res) => {
