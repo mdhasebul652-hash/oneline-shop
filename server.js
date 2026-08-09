@@ -21,13 +21,11 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 
-// Ensure upload directory exists to prevent Multer crashes
 const uploadDir = path.join(__dirname, 'public', 'uploads');
 if (!fs.existsSync(uploadDir)){
     fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Multer Storage Configuration (Supports up to 5 gallery images)
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, uploadDir);
@@ -55,6 +53,7 @@ const productSchema = new mongoose.Schema({
     category: { type: String, required: true },
     price: { type: Number, required: true },
     stock: { type: Number, required: true },
+    maxBuyLimit: { type: Number, default: 4 }, // Maximum purchase limit per product set by admin
     description: { type: String, default: '' },
     mainImage: { type: String, default: '' },
     gallery: [String],
@@ -101,6 +100,7 @@ const Order = mongoose.model('Order', orderSchema);
 const chatSchema = new mongoose.Schema({
     productId: String,
     productName: String,
+    productImage: String,
     userEmail: String,
     message: String,
     reply: { type: String, default: '' },
@@ -222,6 +222,7 @@ app.get('/', async (req, res, next) => {
                 <div style="font-size:11px; color:#888;">Stock: ${p.stock}</div>
             </a>
         `).join('');
+
         let fbHTML = fbContents.map(fb => `
             <div style="background:white; padding:15px; margin-bottom:15px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
                 <p style="font-weight:bold; margin-bottom:8px;">${fb.title}</p>
@@ -229,6 +230,7 @@ app.get('/', async (req, res, next) => {
                 <br><a href="${fb.productLink || '/'}" class="btn btn-buy" style="margin-top:10px; display:inline-block;">⚡ Order Now (Buy Direct)</a>
             </div>
         `).join('');
+
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -315,18 +317,25 @@ app.get('/search', async (req, res, next) => {
     }
 });
 
+// ================= Product Details with Daraj Gallery & Q&A =================
 app.get('/product/:id', async (req, res, next) => {
     try {
         let product = await Product.findById(req.params.id);
         if (!product) return res.send('Product not found');
-        let chats = await Chat.find({ productId: product._id });
+        
+        let chats = req.user ? await Chat.find({ productId: product._id, userEmail: req.user.email }).sort({ _id: -1 }) : [];
         let reviews = await Review.find({ productId: product._id }).sort({ _id: -1 });
         let relatedProducts = await Product.find({ category: product.category, _id: { $ne: product._id } }).limit(4);
-        let galleryHTML = product.gallery.map(img => `<img src="/uploads/${img}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ccc;">`).join('');
+        
+        // All images (Main image + Gallery combined for Daraj style switching)
+        let allImages = [product.mainImage, ...(product.gallery || [])].filter(Boolean);
+        let galleryHTML = allImages.map((img, idx) => `
+            <img src="/uploads/${img}" onclick="changeMainImage('${img}')" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:2px solid ${idx === 0 ? '#f85606' : '#ccc'}; cursor:pointer;" class="thumb-img">
+        `).join('');
         
         let chatsHTML = chats.map(c => `
             <div style="border-bottom:1px solid #eee; padding:8px 0;">
-                <p style="margin:0 0 4px 0;"><b>${c.userEmail}:</b> ${c.message}</p>
+                <p style="margin:0 0 4px 0;"><b>You (${c.userEmail}):</b> ${c.message}</p>
                 <p style="color:green; font-size:13px; margin:0 0 0 15px;"><b>Admin Reply:</b> ${c.reply || 'Pending reply'}</p>
             </div>
         `).join('');
@@ -345,6 +354,7 @@ app.get('/product/:id', async (req, res, next) => {
                 <div class="price" style="font-size:15px;">৳${p.price}</div>
             </a>
         `).join('');
+
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -354,25 +364,37 @@ app.get('/product/:id', async (req, res, next) => {
                 <div class="container" style="background:white; padding:15px; border-radius:6px;">
                     <div style="display:flex; gap:20px; flex-wrap:wrap;">
                         <div style="width:100%; max-width:320px; margin:0 auto;">
-                            <img src="/uploads/${product.mainImage}" style="width:100%; height:300px; object-fit:cover; border-radius:6px;"><br>
+                            <img id="mainProductImg" src="/uploads/${product.mainImage}" style="width:100%; height:300px; object-fit:cover; border-radius:6px;"><br>
                             <div style="display:flex; gap:8px; margin-top:10px; overflow-x:auto;">${galleryHTML}</div>
                         </div>
                         <div style="flex:1; min-width: 260px;">
                             <h2 style="font-size:18px; margin-top:0;">${product.name}</h2>
                             <p style="font-size:13px; color:#666;"><b>Category:</b> ${product.category}</p>
                             <div class="price">৳${product.price}</div>
-                            <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock}</p>
+                            <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock} | <b>Max Buy Limit:</b> ${product.maxBuyLimit || 4}</p>
                             <p style="font-size:14px; color:#440;">${product.description}</p>
                             <br>
-                            <div style="display: flex; gap: 10px;">
-                                <a href="/buy-now/${product._id}" class="btn btn-buy" style="flex: 1; padding:12px; font-size:15px; text-align:center;">Buy Now</a>
-                                <a href="/api/add-to-cart/${product._id}" class="btn" style="flex: 1; padding:12px; font-size:15px; text-align:center; background:#28a745;">🛒 Add to Cart</a>
-                            </div>
+                            
+                            <!-- Quantity Selector & Action Buttons -->
+                            <form action="/api/add-to-cart/${product._id}" method="POST" style="display:flex; flex-direction:column; gap:10px;">
+                                <input type="hidden" name="selectedImage" id="selectedImageInput" value="${product.mainImage}">
+                                <div style="display:flex; align-items:center; gap:10px;">
+                                    <span style="font-size:13px; font-weight:600;">Quantity:</span>
+                                    <button type="button" onclick="adjustQty(-1)" style="padding:4px 10px; font-weight:bold; cursor:pointer;">-</button>
+                                    <input type="number" name="quantity" id="quantityInput" value="1" min="1" max="${product.maxBuyLimit || 4}" style="width:50px; text-align:center; padding:4px;" readonly>
+                                    <button type="button" onclick="adjustQty(1)" style="padding:4px 10px; font-weight:bold; cursor:pointer;">+</button>
+                                </div>
+                                <div style="display: flex; gap: 10px;">
+                                    <button type="submit" formaction="/buy-now-direct/${product._id}" class="btn btn-buy" style="flex: 1; padding:12px; font-size:15px; text-align:center;">Buy Now</button>
+                                    <button type="submit" class="btn" style="flex: 1; padding:12px; font-size:15px; text-align:center; background:#28a745;">🛒 Add to Cart</button>
+                                </div>
+                            </form>
                         </div>
                     </div>
                     
                     <hr style="margin:30px 0; border:0; border-top:1px solid #eee;">
                     
+                    <!-- Ratings & Reviews -->
                     <h3>Ratings & Reviews</h3>
                     <form action="/api/add-review" method="POST" style="background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:15px;">
                         <input type="hidden" name="productId" value="${product._id}">
@@ -394,18 +416,39 @@ app.get('/product/:id', async (req, res, next) => {
                     <div class="product-grid" style="margin-top:10px;">${relatedHTML.length ? relatedHTML : '<p>No related products.</p>'}</div>
                     
                     <hr style="margin:30px 0; border:0; border-top:1px solid #eee;">
+                    
+                    <!-- Product Specific Q&A Chat -->
                     <h3>Ask Question About This Product</h3>
+                    ${req.user ? `
                     <form action="/api/chat" method="POST">
                         <input type="hidden" name="productId" value="${product._id}">
                         <input type="hidden" name="productName" value="${product.name}">
+                        <input type="hidden" name="productImage" value="${product.mainImage}">
                         <textarea name="message" placeholder="Ask your question here..." style="width:100%; height:70px; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea><br>
                         <button type="submit" class="btn" style="margin-top:6px; padding:8px 14px;">Send Question</button>
                     </form>
+                    ` : '<p style="color:red; font-size:13px;">Please <a href="/login">Login</a> to ask questions about this product.</p>'}
+                    
                     <div style="margin-top:20px;">
                         <h4 style="margin-bottom:10px;">Customer Q&A (পণ্যের বিষয়ে আপনার ও এডমিনের কথোপকথন):</h4>
-                        ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions yet.</p>'}
+                        ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions yet for this product.</p>'}
                     </div>
                 </div>
+
+                <script>
+                    function changeMainImage(imgName) {
+                        document.getElementById('mainProductImg').src = '/uploads/' + imgName;
+                        document.getElementById('selectedImageInput').value = imgName;
+                    }
+                    function adjustQty(val) {
+                        let qtyInput = document.getElementById('quantityInput');
+                        let maxLimit = Number(qtyInput.getAttribute('max')) || 4;
+                        let current = Number(qtyInput.value) + val;
+                        if(current < 1) current = 1;
+                        if(current > maxLimit) current = maxLimit;
+                        qtyInput.value = current;
+                    }
+                </script>
             </body>
             </html>
         `);
@@ -432,11 +475,12 @@ app.post('/api/add-review', async (req, res, next) => {
 
 app.post('/api/chat', async (req, res, next) => {
     try {
-        let email = req.user ? req.user.email : 'Guest User';
+        if (!req.user) return res.redirect('/login');
         await new Chat({
             productId: req.body.productId,
             productName: req.body.productName,
-            userEmail: email,
+            productImage: req.body.productImage,
+            userEmail: req.user.email,
             message: req.body.message
         }).save();
         res.redirect('back');
@@ -445,33 +489,42 @@ app.post('/api/chat', async (req, res, next) => {
     }
 });
 
-// ================= Shopping Cart System (Max 4 Items) =================
-app.get('/api/add-to-cart/:id', async (req, res, next) => {
+// ================= Shopping Cart System (With Quantity & Max Limits) =================
+app.post('/api/add-to-cart/:id', async (req, res, next) => {
     try {
         let productId = req.params.id;
+        let quantity = Number(req.body.quantity) || 1;
+        let selectedImage = req.body.selectedImage;
+        
         let product = await Product.findById(productId);
         if (!product) return res.send(`<script>alert('Product not found!'); window.history.back();</script>`);
-
-        let cart = req.cookies.cart ? JSON.parse(req.cookies.cart) : [];
         
-        // Check if already in cart
-        let exists = cart.find(item => item.productId === productId);
-        if (exists) {
-            return res.send(`<script>alert('Product is already in your cart!'); window.location.href='/cart';</script>`);
+        let cart = req.cookies.cart ? JSON.parse(req.cookies.cart) : [];
+        let maxLimit = product.maxBuyLimit || 4;
+        
+        if (quantity > maxLimit) {
+            quantity = maxLimit;
         }
 
-        // Limit check (Maximum 4 items)
-        if (cart.length >= 4) {
-            return res.send(`<script>alert('আপনি সর্বোচ্চ ৪টি পণ্য একসাথে কার্ট (Cart) এ রাখতে পারবেন!'); window.location.href='/cart';</script>`);
+        let existingIndex = cart.findIndex(item => item.productId === productId);
+        if (existingIndex > -1) {
+            let newQty = cart[existingIndex].quantity + quantity;
+            if (newQty > maxLimit) newQty = maxLimit;
+            cart[existingIndex].quantity = newQty;
+            if(selectedImage) cart[existingIndex].mainImage = selectedImage;
+        } else {
+            if (cart.length >= 10) { // Global cart items limit safeguard
+                return res.send(`<script>alert('কার্টে অনেকগুলো ভিন্ন পণ্য রয়েছে!'); window.location.href='/cart';</script>`);
+            }
+            cart.push({
+                productId: product._id.toString(),
+                productName: product.name,
+                price: product.price,
+                mainImage: selectedImage || product.mainImage,
+                quantity: quantity,
+                maxLimit: maxLimit
+            });
         }
-
-        cart.push({
-            productId: product._id.toString(),
-            productName: product.name,
-            price: product.price,
-            mainImage: product.mainImage
-        });
-
         res.cookie('cart', JSON.stringify(cart));
         res.redirect('/cart');
     } catch (err) {
@@ -490,23 +543,25 @@ app.get('/api/remove-from-cart/:id', (req, res) => {
 app.get('/cart', async (req, res, next) => {
     try {
         let cart = req.cookies.cart ? JSON.parse(req.cookies.cart) : [];
-        let subtotal = cart.reduce((sum, item) => sum + item.price, 0);
-
+        let subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+        
         let cartItemsHTML = cart.map(item => `
-            <div style="display:flex; justify-content:space-between; align-items:center; background:#f9f9f9; padding:10px; margin-bottom:10px; border-radius:4px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#f9f9f9; padding:10px; margin-bottom:10px; border-radius:4px; flex-wrap:wrap; gap:10px;">
                 <div style="display:flex; align-items:center; gap:10px;">
                     <img src="/uploads/${item.mainImage}" width="50" height="50" style="object-fit:cover; border-radius:4px;">
                     <div>
                         <h4 style="margin:0 0 4px 0; font-size:14px;">${item.productName}</h4>
-                        <p style="margin:0; color:#f85606; font-weight:bold;">৳${item.price}</p>
+                        <p style="margin:0; color:#f85606; font-weight:bold;">৳${item.price} x ${item.quantity} = ৳${item.price * item.quantity}</p>
                     </div>
                 </div>
-                <a href="/api/remove-from-cart/${item.productId}" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px;">Remove</a>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <a href="/api/remove-from-cart/${item.productId}" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px;">Remove</a>
+                </div>
             </div>
         `).join('');
 
-        let checkoutBtn = cart.length > 0 ? `<a href="/cart-checkout" class="btn btn-buy" style="width:100%; text-align:center; padding:12px; margin-top:15px; display:block; font-size:16px;">Proceed to Checkout (${cart.length} Items)</a>` : '';
-
+        let checkoutBtn = cart.length > 0 ? `<a href="/cart-checkout" class="btn btn-buy" style="width:100%; text-align:center; padding:12px; margin-top:15px; display:block; font-size:16px;">Proceed to Checkout</a>` : '';
+        
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -514,7 +569,7 @@ app.get('/cart', async (req, res, next) => {
             <body>
                 ${getNavbarHTML(req.user)}
                 <div class="container" style="max-width:700px; background:white; padding:20px; border-radius:6px;">
-                    <h3 style="margin-top:0;">🛒 Shopping Cart (সর্বোচ্চ ৪টি পণ্য)</h3>
+                    <h3 style="margin-top:0;">🛒 Shopping Cart</h3>
                     ${cartItemsHTML.length ? cartItemsHTML : '<p style="color:#777; text-align:center; padding:30px;">Your cart is empty.</p>'}
                     ${cart.length > 0 ? `<hr style="border:0; border-top:1px solid #ddd; margin:15px 0;"><h4 style="text-align:right; margin:0;">Subtotal: ৳${subtotal}</h4>` : ''}
                     ${checkoutBtn}
@@ -535,18 +590,15 @@ app.get('/cart-checkout', async (req, res, next) => {
         if (!req.user) {
             return res.redirect('/login?redirect=/cart-checkout');
         }
-
-        let subtotal = cart.reduce((sum, item) => sum + item.price, 0);
+        let subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
         let siteSetting = await SiteSetting.findOne() || { bkashNumber: '01700000000', nagadNumber: '01800000000' };
         
         let codOptionHTML = req.user.isBlocked ? 
-            `<p style="color:red; font-size:12px;"><b>Note:</b> Cash on Delivery is disabled for your account. Please pay via bKash/Nagad.</p>` :
+            `<p style="color:red; font-size:12px;"><b>Note:</b> Cash on Delivery is disabled for your account.</p>` :
             `<option value="COD">Cash on Delivery</option>`;
-        let advanceWarning = req.user.isBlocked ? 
-            `<div style="background:#fff3cd; padding:10px; border-radius:4px; margin-bottom:10px; color:#856404; font-size:13px;">⚠️ <b>Notice:</b> Please pay via bKash/Nagad to process your order.</div>` : '';
 
-        let itemsSummaryHTML = cart.map(i => `<span style="font-size:13px; display:block;">• ${i.productName} (৳${i.price})</span>`).join('');
-
+        let itemsSummaryHTML = cart.map(i => `<span style="font-size:13px; display:block;">• ${i.productName} (Qty: ${i.quantity}) - ৳${i.price * i.quantity}</span>`).join('');
+        
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -555,7 +607,6 @@ app.get('/cart-checkout', async (req, res, next) => {
                 ${getNavbarHTML(req.user)}
                 <div class="container" style="max-width:600px; background:white; padding:20px; border-radius:6px;">
                     <h3 style="margin-top:0;">Cart Order Checkout</h3>
-                    ${advanceWarning}
                     <div style="background:#f9f9f9; padding:10px; border-radius:4px; margin-bottom:15px;">
                         <p style="margin:0 0 5px 0; font-weight:bold;">Selected Items (${cart.length}):</p>
                         ${itemsSummaryHTML}
@@ -572,9 +623,9 @@ app.get('/cart-checkout', async (req, res, next) => {
                         
                         <label style="font-size:13px; font-weight:600;">Delivery Area / Location:</label><br>
                         <select name="deliveryArea" id="deliveryArea" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" onchange="calculateTotal()" required>
-                            <option value="Local Town">লোকাল টাউন / একই শহর (Local / Same City) - ৳60</option>
-                            <option value="Inside Dhaka">ঢাকার ভেতরে (Inside Dhaka) - ৳120</option>
-                            <option value="Outside Dhaka">ঢাকার বাইরে / অন্যান্য জেলা (Outside Dhaka) - ৳150</option>
+                            <option value="Local Town">লোকাল টাউন / একই শহর - ৳60</option>
+                            <option value="Inside Dhaka">ঢাকার ভেতরে - ৳120</option>
+                            <option value="Outside Dhaka">ঢাকার বাইরে / অন্যান্য জেলা - ৳150</option>
                         </select><br>
                         
                         <label style="font-size:13px; font-weight:600;">Delivery Address:</label><br>
@@ -587,7 +638,7 @@ app.get('/cart-checkout', async (req, res, next) => {
                         </div>
                         <p id="couponMsg" style="font-size:12px; margin:0 0 10px 0; color:green;"></p>
                         
-                        <label style="font-size:13px; font-weight:600;">Customer Note / Instructions:</label><br>
+                        <label style="font-size:13px; font-weight:600;">Customer Note:</label><br>
                         <input type="text" name="customerNote" placeholder="যেমন: বিকালে কল করবেন" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;"><br>
                         
                         <div style="background:#f0f8ff; padding:12px; border-radius:4px; margin-bottom:12px; font-size:14px; border:1px solid #bce8f1;">
@@ -605,16 +656,16 @@ app.get('/cart-checkout', async (req, res, next) => {
                             <option value="Nagad">নগদ (নগদ পার্সোনাল পেমেন্ট)</option>
                         </select><br>
                         
-                        <div id="onlinePaymentDiv" style="display:${req.user.isBlocked ? 'block' : 'none'}; background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:10px; border:1px dashed #f85606;">
-                            <p style="font-size:13px; color:#333; margin:0 0 6px 0;">আমাদের বিকাশ নাম্বার: <b style="color:#f85606; font-size:15px;">${siteSetting.bkashNumber}</b> | নগদ নাম্বার: <b style="color:#f85606; font-size:15px;">${siteSetting.nagadNumber}</b></p>
-                            <label style="font-size:12px; font-weight:600;">আপনার বিকাশ/নগদ একাউন্ট নাম্বার <span style="color:red;">*</span>:</label><br>
-                            <input type="text" name="senderNumber" id="senderNumber" placeholder="যেমন: 01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
+                        <div id="onlinePaymentDiv" style="display:none; background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:10px; border:1px dashed #f85606;">
+                            <p style="font-size:13px; color:#333; margin:0 0 6px 0;">বিকাশ: <b style="color:#f85606;">${siteSetting.bkashNumber}</b> | নগদ: <b style="color:#f85606;">${siteSetting.nagadNumber}</b></p>
+                            <label style="font-size:12px; font-weight:600;">আপনার বিকাশ/নগদ অ্যাকাউন্ট নম্বর *:</label><br>
+                            <input type="text" name="senderNumber" id="senderNumber" placeholder="01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
                             
-                            <label style="font-size:12px; font-weight:600;">প্রেরিত টাকার পরিমাণ (টাকা) <span style="color:red;">*</span>:</label><br>
-                            <input type="number" name="paidAmount" id="paidAmount" placeholder="যেমন: মোট টাকা" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
+                            <label style="font-size:12px; font-weight:600;">প্রেরিত টাকার পরিমাণ *:</label><br>
+                            <input type="number" name="paidAmount" id="paidAmount" placeholder="মোট টাকা" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
                             
-                            <label style="font-size:12px; font-weight:600;">ট্রানজেকশন আইডি (TrxID - ঐচ্ছিক):</label><br>
-                            <input type="text" name="trxId" placeholder="যেমন: 9N7A6..." style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;">
+                            <label style="font-size:12px; font-weight:600;">ট্রানজেকশন আইডি (TrxID):</label><br>
+                            <input type="text" name="trxId" placeholder="TrxID" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;">
                         </div>
                         
                         <button type="submit" class="btn btn-buy" style="width:100%; padding:12px; font-size:16px; margin-top:5px;">⚡ Confirm Cart Order</button>
@@ -640,7 +691,7 @@ app.get('/cart-checkout', async (req, res, next) => {
                                 document.getElementById('discountText').innerText = appliedDiscount;
                                 document.getElementById('discountRow').style.display = 'block';
                                 msg.style.color = 'green';
-                                msg.innerText = 'Coupon applied successfully! Discount: ৳' + appliedDiscount;
+                                msg.innerText = 'Coupon applied! Discount: ৳' + appliedDiscount;
                                 calculateTotal();
                             } else {
                                 msg.style.color = 'red';
@@ -691,31 +742,22 @@ app.post('/api/place-cart-order', async (req, res, next) => {
         if (!req.user) return res.redirect('/login');
         let cart = req.cookies.cart ? JSON.parse(req.cookies.cart) : [];
         if (cart.length === 0) return res.redirect('/cart');
-
         const { name, phone, address, deliveryArea, discountPrice, customerNote, paymentMethod, senderNumber, paidAmount, trxId } = req.body;
         
-        if (req.user.isBlocked && paymentMethod === 'COD') {
-            return res.send(`<script>alert('COD is disabled for your account. Please pay via bKash or Nagad.'); window.history.back();</script>`);
-        }
-        if ((paymentMethod === 'bKash' || paymentMethod === 'Nagad') && (!senderNumber || !paidAmount)) {
-            return res.send(`<script>alert('বিকাশ বা নগদ সিলেক্ট করলে Sender Number এবং Paid Amount ঘর দুটি পূরণ করা বাধ্যতামূলক!'); window.history.back();</script>`);
-        }
-
         let deliveryCharge = 60;
         if (deliveryArea === 'Inside Dhaka') deliveryCharge = 120;
         else if (deliveryArea === 'Outside Dhaka') deliveryCharge = 150;
-
-        let productPrice = cart.reduce((sum, item) => sum + item.price, 0);
+        
+        let productPrice = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
         let discount = Number(discountPrice) || 0;
         let totalAmount = (productPrice + deliveryCharge) - discount;
-
+        
         await User.findByIdAndUpdate(req.user._id, { name, phone, address });
-
-        // Update stock and soldCount for all items in cart
+        
         for (let item of cart) {
-            await Product.findByIdAndUpdate(item.productId, { $inc: { stock: -1, soldCount: 1 } });
+            await Product.findByIdAndUpdate(item.productId, { $inc: { stock: -item.quantity, soldCount: item.quantity } });
         }
-
+        
         await new Order({
             userEmail: req.user.email,
             items: cart,
@@ -732,8 +774,7 @@ app.post('/api/place-cart-order', async (req, res, next) => {
             status: 'Pending',
             previousStatus: 'Pending'
         }).save();
-
-        // Clear cart cookie after successful order
+        
         res.clearCookie('cart');
         res.send(`<script>alert('Order placed successfully!'); window.location.href='/my-orders';</script>`);
     } catch (err) {
@@ -741,22 +782,25 @@ app.post('/api/place-cart-order', async (req, res, next) => {
     }
 });
 
-// ================= Buy Now Direct Checkout Flow =================
-app.get('/buy-now/:id', async (req, res, next) => {
+// ================= Direct Buy Now Flow =================
+app.post('/buy-now-direct/:id', async (req, res, next) => {
     try {
-        let product = await Product.findById(req.params.id);
+        let productId = req.params.id;
+        let quantity = Number(req.body.quantity) || 1;
+        let selectedImage = req.body.selectedImage;
+        
+        let product = await Product.findById(productId);
         if (!product) return res.send('Product not found');
         if (!req.user) {
-            return res.redirect('/login?redirect=/buy-now/' + product._id);
+            return res.redirect('/login');
         }
+        
         let siteSetting = await SiteSetting.findOne() || { bkashNumber: '01700000000', nagadNumber: '01800000000' };
+        let unitPrice = product.price;
+        let subtotal = unitPrice * quantity;
         
-        let codOptionHTML = req.user.isBlocked ? 
-            `<p style="color:red; font-size:12px;"><b>Note:</b> Cash on Delivery is disabled for your account. Please pay via bKash/Nagad.</p>` :
-            `<option value="COD">Cash on Delivery</option>`;
-        let advanceWarning = req.user.isBlocked ? 
-            `<div style="background:#fff3cd; padding:10px; border-radius:4px; margin-bottom:10px; color:#856404; font-size:13px;">⚠️ <b>Notice:</b> Please pay via bKash/Nagad to process your order.</div>` : '';
-        
+        let codOptionHTML = req.user.isBlocked ? `` : `<option value="COD">Cash on Delivery</option>`;
+
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -764,21 +808,21 @@ app.get('/buy-now/:id', async (req, res, next) => {
             <body>
                 ${getNavbarHTML(req.user)}
                 <div class="container" style="max-width:600px; background:white; padding:20px; border-radius:6px;">
-                    <h3 style="margin-top:0;">Checkout Order</h3>
-                    ${advanceWarning}
+                    <h3 style="margin-top:0;">Direct Checkout</h3>
                     <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
-                        <img src="/uploads/${product.mainImage}" width="60" height="60" style="object-fit:cover; border-radius:4px;">
+                        <img src="/uploads/${selectedImage || product.mainImage}" width="60" height="60" style="object-fit:cover; border-radius:4px;">
                         <div>
-                            <p style="font-size:14px; margin:0; font-weight:bold;">${product.name}</p>
-                            <p style="font-size:14px; margin:4px 0 0 0; color:#f85606;">Price: ৳<span id="productPrice">${product.price}</span></p>
+                            <p style="font-size:14px; margin:0; font-weight:bold;">${product.name} (Qty: ${quantity})</p>
+                            <p style="font-size:14px; margin:4px 0 0 0; color:#f85606;">Total Price: ৳<span id="productPrice">${subtotal}</span></p>
                         </div>
                     </div>
                     
-                    <form action="/api/place-order" method="POST">
+                    <form action="/api/place-direct-order" method="POST">
                         <input type="hidden" name="productId" value="${product._id}">
                         <input type="hidden" name="productName" value="${product.name}">
-                        <input type="hidden" name="mainImage" value="${product.mainImage}">
-                        <input type="hidden" name="price" value="${product.price}">
+                        <input type="hidden" name="mainImage" value="${selectedImage || product.mainImage}">
+                        <input type="hidden" name="price" value="${unitPrice}">
+                        <input type="hidden" name="quantity" value="${quantity}">
                         <input type="hidden" name="discountPrice" id="discountPriceInput" value="0">
                         
                         <label style="font-size:13px; font-weight:600;">Full Name:</label><br>
@@ -787,54 +831,54 @@ app.get('/buy-now/:id', async (req, res, next) => {
                         <label style="font-size:13px; font-weight:600;">Phone Number:</label><br>
                         <input type="text" name="phone" value="${req.user.phone || ''}" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br>
                         
-                        <label style="font-size:13px; font-weight:600;">Delivery Area / Location (ডেলিভারি জোন সিলেক্ট করুন):</label><br>
+                        <label style="font-size:13px; font-weight:600;">Delivery Area:</label><br>
                         <select name="deliveryArea" id="deliveryArea" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" onchange="calculateTotal()" required>
-                            <option value="Local Town">লোকাল টাউন / একই শহর (Local / Same City) - ৳60</option>
-                            <option value="Inside Dhaka">ঢাকার ভেতরে (Inside Dhaka) - ৳120</option>
-                            <option value="Outside Dhaka">ঢাকার বাইরে / অন্যান্য জেলা (Outside Dhaka) - ৳150</option>
+                            <option value="Local Town">লোকাল টাউন / একই শহর - ৳60</option>
+                            <option value="Inside Dhaka">ঢাকার ভেতরে - ৳120</option>
+                            <option value="Outside Dhaka">ঢাকার বাইরে / অন্যান্য জেলা - ৳150</option>
                         </select><br>
                         
                         <label style="font-size:13px; font-weight:600;">Delivery Address:</label><br>
                         <textarea name="address" style="width:100%; height:60px; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>${req.user.address || ''}</textarea><br>
                         
-                        <label style="font-size:13px; font-weight:600;">Coupon Code (যদি থাকে):</label><br>
+                        <label style="font-size:13px; font-weight:600;">Coupon Code:</label><br>
                         <div style="display:flex; gap:5px; margin:4px 0 10px 0;">
                             <input type="text" name="couponCode" id="couponCodeInput" placeholder="Enter Coupon Code" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
                             <button type="button" onclick="applyCoupon()" class="btn" style="padding:8px 12px; font-size:12px;">Apply</button>
                         </div>
                         <p id="couponMsg" style="font-size:12px; margin:0 0 10px 0; color:green;"></p>
                         
-                        <label style="font-size:13px; font-weight:600;">Customer Note / Instructions (ঐচ্ছিক):</label><br>
+                        <label style="font-size:13px; font-weight:600;">Customer Note:</label><br>
                         <input type="text" name="customerNote" placeholder="যেমন: বিকালে কল করবেন" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;"><br>
                         
                         <div style="background:#f0f8ff; padding:12px; border-radius:4px; margin-bottom:12px; font-size:14px; border:1px solid #bce8f1;">
-                            <p style="margin:2px 0;">Product Price: ৳${product.price}</p>
+                            <p style="margin:2px 0;">Product Price: ৳${subtotal}</p>
                             <p style="margin:2px 0;">Delivery Charge: ৳<span id="deliveryChargeText">60</span></p>
                             <p style="margin:2px 0; color:red; display:none;" id="discountRow">Discount: -৳<span id="discountText">0</span></p>
                             <hr style="border:0; border-top:1px solid #ccc; margin:6px 0;">
-                            <p style="margin:2px 0; font-weight:bold; color:#f85606; font-size:16px;">Total Payable Amount: ৳<span id="totalAmountText">${product.price + 60}</span></p>
+                            <p style="margin:2px 0; font-weight:bold; color:#f85606; font-size:16px;">Total Payable Amount: ৳<span id="totalAmountText">${subtotal + 60}</span></p>
                         </div>
                         
                         <label style="font-size:13px; font-weight:600;">Payment Method:</label><br>
                         <select name="paymentMethod" id="paymentMethod" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" onchange="togglePaymentFields()" required>
                             ${codOptionHTML}
-                            <option value="bKash">বিকাশ (বিকাশ পার্সোনাল পেমেন্ট)</option>
-                            <option value="Nagad">নগদ (নগদ পার্সোনাল পেমেন্ট)</option>
+                            <option value="bKash">বিকাশ</option>
+                            <option value="Nagad">নগদ</option>
                         </select><br>
                         
-                        <div id="onlinePaymentDiv" style="display:${req.user.isBlocked ? 'block' : 'none'}; background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:10px; border:1px dashed #f85606;">
-                            <p style="font-size:13px; color:#333; margin:0 0 6px 0;">আমাদের বিকাশ নাম্বার: <b style="color:#f85606; font-size:15px;">${siteSetting.bkashNumber}</b> | নগদ নাম্বার: <b style="color:#f85606; font-size:15px;">${siteSetting.nagadNumber}</b></p>
-                            <label style="font-size:12px; font-weight:600;">আপনার বিকাশ/নগদ একাউন্ট নাম্বার <span style="color:red;">*</span>:</label><br>
-                            <input type="text" name="senderNumber" id="senderNumber" placeholder="যেমন: 01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
+                        <div id="onlinePaymentDiv" style="display:none; background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:10px; border:1px dashed #f85606;">
+                            <p style="font-size:13px; color:#333; margin:0 0 6px 0;">বিকাশ: <b style="color:#f85606;">${siteSetting.bkashNumber}</b> | নগদ: <b style="color:#f85606;">${siteSetting.nagadNumber}</b></p>
+                            <label style="font-size:12px; font-weight:600;">আপনার বিকাশ/নগদ অ্যাকাউন্ট নম্বর *:</label><br>
+                            <input type="text" name="senderNumber" id="senderNumber" placeholder="01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
                             
-                            <label style="font-size:12px; font-weight:600;">প্রেরিত টাকার পরিমাণ (টাকা) <span style="color:red;">*</span>:</label><br>
-                            <input type="number" name="paidAmount" id="paidAmount" placeholder="যেমন: মোট টাকা" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
+                            <label style="font-size:12px; font-weight:600;">প্রেরিত টাকার পরিমাণ *:</label><br>
+                            <input type="number" name="paidAmount" id="paidAmount" placeholder="মোট টাকা" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br>
                             
-                            <label style="font-size:12px; font-weight:600;">ট্রানজেকশন আইডি (TrxID - ঐচ্ছিক):</label><br>
-                            <input type="text" name="trxId" placeholder="যেমন: 9N7A6..." style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;">
+                            <label style="font-size:12px; font-weight:600;">ট্রানজেকশন আইডি (TrxID):</label><br>
+                            <input type="text" name="trxId" placeholder="TrxID" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;">
                         </div>
                         
-                        <button type="submit" class="btn btn-buy" style="width:100%; padding:12px; font-size:16px; margin-top:5px;">⚡ Order Now</button>
+                        <button type="submit" class="btn btn-buy" style="width:100%; padding:12px; font-size:16px; margin-top:5px;">⚡ Confirm Order</button>
                     </form>
                 </div>
                 
@@ -857,7 +901,7 @@ app.get('/buy-now/:id', async (req, res, next) => {
                                 document.getElementById('discountText').innerText = appliedDiscount;
                                 document.getElementById('discountRow').style.display = 'block';
                                 msg.style.color = 'green';
-                                msg.innerText = 'Coupon applied successfully! Discount: ৳' + appliedDiscount;
+                                msg.innerText = 'Coupon applied! Discount: ৳' + appliedDiscount;
                                 calculateTotal();
                             } else {
                                 msg.style.color = 'red';
@@ -917,29 +961,29 @@ app.post('/api/verify-coupon', async (req, res, next) => {
     }
 });
 
-app.post('/api/place-order', async (req, res, next) => {
+app.post('/api/place-direct-order', async (req, res, next) => {
     try {
         if (!req.user) return res.redirect('/login');
-        const { productId, productName, mainImage, price, name, phone, address, deliveryArea, discountPrice, customerNote, paymentMethod, senderNumber, paidAmount, trxId } = req.body;
-        if (req.user.isBlocked && paymentMethod === 'COD') {
-            return res.send(`<script>alert('COD is disabled for your account. Please pay via bKash or Nagad.'); window.history.back();</script>`);
-        }
-        if ((paymentMethod === 'bKash' || paymentMethod === 'Nagad') && (!senderNumber || !paidAmount)) {
-            return res.send(`<script>alert('বিকাশ বা নগদ সিলেক্ট করলে Sender Number এবং Paid Amount ঘর দুটি পূরণ করা বাধ্যতামূলক!'); window.history.back();</script>`);
-        }
+        const { productId, productName, mainImage, price, quantity, name, phone, address, deliveryArea, discountPrice, customerNote, paymentMethod, senderNumber, paidAmount, trxId } = req.body;
+        
+        let qty = Number(quantity) || 1;
+        let unitPrice = Number(price);
         let deliveryCharge = 60;
         if (deliveryArea === 'Inside Dhaka') deliveryCharge = 120;
         else if (deliveryArea === 'Outside Dhaka') deliveryCharge = 150;
-        let productPrice = Number(price);
+        
+        let productPrice = unitPrice * qty;
         let discount = Number(discountPrice) || 0;
         let totalAmount = (productPrice + deliveryCharge) - discount;
         
         await User.findByIdAndUpdate(req.user._id, { name, phone, address });
-        await Product.findByIdAndUpdate(productId, { $inc: { stock: -1, soldCount: 1 } });
+        await Product.findByIdAndUpdate(productId, { $inc: { stock: -qty, soldCount: qty } });
+        
+        let cartItem = [{ productId, productName, mainImage, price: unitPrice, quantity: qty }];
         
         await new Order({
             userEmail: req.user.email,
-            items: [{ productId, productName, mainImage, price: productPrice }],
+            items: cartItem,
             productPrice,
             deliveryCharge,
             discountPrice: discount,
@@ -1054,9 +1098,21 @@ app.get('/dashboard', async (req, res, next) => {
     try {
         if (!req.user) return res.redirect('/login');
         let orders = await Order.find({ userEmail: req.user.email });
-        let ordersHTML = orders.map(o => `<tr><td>${o._id}</td><td>৳${o.totalAmount}</td><td>${o.paymentMethod}</td><td>${o.status}</td></tr>`).join('');
-        let blockStatusNotice = req.user.isBlocked ? `<p style="color:red; font-weight:bold; font-size:13px;">Account Status: Cash on Delivery Restricted</p>` : `<p style="color:green; font-weight:bold; font-size:13px;">Account Status: Good Standing</p>`;
+        let userChats = await Chat.find({ userEmail: req.user.email }).sort({ _id: -1 });
         
+        let ordersHTML = orders.map(o => `<tr><td>${o._id}</td><td>৳${o.totalAmount}</td><td>${o.paymentMethod}</td><td>${o.status}</td></tr>`).join('');
+        
+        let chatsHTML = userChats.map(c => `
+            <div style="background:#f9f9f9; padding:10px; margin-bottom:8px; border-radius:4px; font-size:13px; display:flex; gap:10px; align-items:center;">
+                ${c.productImage ? `<img src="/uploads/${c.productImage}" width="45" height="45" style="object-fit:cover; border-radius:4px;">` : ''}
+                <div style="flex:1;">
+                    <p style="margin:0 0 2px 0;"><b>Product:</b> <a href="/product/${c.productId}">${c.productName}</a></p>
+                    <p style="margin:0 0 2px 0;"><b>Your Question:</b> ${c.message}</p>
+                    <p style="margin:0; color:green;"><b>Admin Reply:</b> ${c.reply || 'No reply yet'}</p>
+                </div>
+            </div>
+        `).join('');
+
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -1066,7 +1122,6 @@ app.get('/dashboard', async (req, res, next) => {
                 <div class="container" style="background:white; padding:20px; border-radius:6px;">
                     <h3 style="margin-top:0;">My Account Dashboard</h3>
                     <p style="font-size:14px;"><b>Email:</b> ${req.user.email}</p>
-                    ${blockStatusNotice}
                     
                     <form action="/api/update-profile" method="POST" style="max-width:400px; margin-top:20px;">
                         <h4 style="margin-bottom:10px;">Update Profile Info</h4>
@@ -1081,6 +1136,10 @@ app.get('/dashboard', async (req, res, next) => {
                         
                         <button type="submit" class="btn" style="padding:8px 16px;">Save Profile</button>
                     </form>
+                    
+                    <hr style="margin:25px 0; border:0; border-top:1px solid #eee;">
+                    <h4>My Product Inquiries & Admin Replies (পণ্যের চ্যাট বক্স):</h4>
+                    <div>${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No inquiries found.</p>'}</div>
                     
                     <hr style="margin:25px 0; border:0; border-top:1px solid #eee;">
                     <h4 style="margin-bottom:10px;">My Orders History</h4>
@@ -1128,33 +1187,32 @@ app.get('/my-orders', async (req, res, next) => {
                 statusText = 'Confirmed (আপনার অর্ডারটি কনফার্ম করা হয়েছে)';
             } else if (o.status === 'Delivered') {
                 statusColor = '#28a745';
-                statusText = 'Completed / Delivered (আপনার অর্ডারটি সফলভাবে সম্পন্ন হয়েছে)';
+                statusText = 'Completed / Delivered (সম্পন্ন হয়েছে)';
             } else if (o.status === 'Cancelled') {
                 statusColor = '#dc3545';
-                statusText = 'Cancelled (অর্ডারটি বাতিল করা হয়েছে)';
+                statusText = 'Cancelled (বাতিল করা হয়েছে)';
             }
             let itemsList = o.items.map(i => `
                 <div style="display:flex; align-items:center; gap:8px; margin:4px 0;">
                     ${i.mainImage ? `<img src="/uploads/${i.mainImage}" width="40" height="40" style="object-fit:cover; border-radius:4px;">` : ''}
-                    <span>${i.productName} (৳${i.price})</span>
+                    <span>${i.productName} (Qty: ${i.quantity || 1}) - ৳${i.price}</span>
                 </div>
             `).join('');
             let cancelBtn = (o.status === 'Pending') ? `
-                <a href="/api/cancel-order/${o._id}" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px; margin-top:8px; display:inline-block;" onclick="return confirm('Are you sure you want to cancel this order?');">❌ Cancel Order</a>
+                <a href="/api/cancel-order/${o._id}" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px; margin-top:8px; display:inline-block;" onclick="return confirm('Cancel this order?');">❌ Cancel Order</a>
             ` : '';
             return `
                 <div style="background:#fff; padding:15px; margin-bottom:12px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-size:14px;">
                     <p style="margin:5px 0;"><b>Order ID:</b> ${o._id}</p>
                     <p style="margin:5px 0;"><b>Items Ordered:</b></p>
                     <div style="background:#f9f9f9; padding:8px; border-radius:4px;">${itemsList}</div>
-                    <p style="margin:5px 0;"><b>Price:</b> ৳${o.productPrice || (o.totalAmount - (o.deliveryCharge || 0))} + Delivery: ৳${o.deliveryCharge || 0} ${o.discountPrice ? `- Discount: ৳${o.discountPrice}` : ''} = <b style="color:#f85606;">৳${o.totalAmount}</b> (${o.paymentMethod})</p>
-                    ${o.customerNote ? `<p style="margin:5px 0; color:#555; font-size:13px;"><b>Note:</b> ${o.customerNote}</p>` : ''}
-                    <p style="margin:5px 0;"><b>Status Update:</b> <span style="color:${statusColor}; font-weight:bold;">${statusText}</span></p>
-                    <p style="margin:5px 0; color:#666; font-size:12px;"><b>Date:</b> ${new Date(o.createdAt).toLocaleString()}</p>
+                    <p style="margin:5px 0;"><b>Total:</b> <b style="color:#f85606;">৳${o.totalAmount}</b> (${o.paymentMethod})</p>
+                    <p style="margin:5px 0;"><b>Status:</b> <span style="color:${statusColor}; font-weight:bold;">${statusText}</span></p>
                     ${cancelBtn}
                 </div>
             `;
         }).join('');
+
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -1182,7 +1240,8 @@ app.get('/api/cancel-order/:id', async (req, res, next) => {
             order.previousStatus = 'Cancelled';
             await order.save();
             for (let item of order.items) {
-                await Product.findByIdAndUpdate(item.productId, { $inc: { stock: 1, soldCount: -1 } });
+                let q = item.quantity || 1;
+                await Product.findByIdAndUpdate(item.productId, { $inc: { stock: q, soldCount: -q } });
             }
         }
         res.redirect('/my-orders');
@@ -1202,50 +1261,45 @@ app.get('/admin-dashboard', async (req, res, next) => {
         let coupons = await Coupon.find().sort({ _id: -1 });
         let siteSetting = await SiteSetting.findOne() || { bkashNumber: '01700000000', nagadNumber: '01800000000', pageId: '', accessToken: '' };
         
-        let pendingCount = await Order.countDocuments({ status: 'Pending' });
-        let confirmedCount = await Order.countDocuments({ status: 'Confirmed' });
-        let completedCount = await Order.countDocuments({ status: 'Delivered' });
-        let cancelledCount = await Order.countDocuments({ status: 'Cancelled' });
-        let trashCount = await Order.countDocuments({ status: 'Trash' });
         let queryStatus = 'Pending';
         if (activeTab === 'confirmed') queryStatus = 'Confirmed';
         if (activeTab === 'completed') queryStatus = 'Delivered';
         if (activeTab === 'cancelled') queryStatus = 'Cancelled';
         if (activeTab === 'trash') queryStatus = 'Trash';
+        
         let orders = await Order.find({ status: queryStatus }).sort({ _id: -1 });
         let allDeliveredOrders = await Order.find({ status: 'Delivered' });
-        let lowStockCount = products.filter(p => p.stock < 5).length;
         let totalSoldItems = products.reduce((acc, p) => acc + (p.soldCount || 0), 0);
         let totalRevenue = allDeliveredOrders.reduce((acc, o) => acc + (o.totalAmount || 0), 0);
         
         let productsHTML = products.map(p => `
-            <tr style="${p.stock < 5 ? 'background:#fff3cd;' : ''}">
+            <tr>
                 <td><img src="/uploads/${p.mainImage}" width="35" height="35" style="object-fit:cover; border-radius:3px;"></td>
-                <td>${p.name} ${p.stock < 5 ? '<span style="color:red; font-size:10px;">(Low)</span>' : ''}</td>
+                <td>${p.name}</td>
                 <td>৳${p.price}</td>
-                <td>${p.stock}</td>
+                <td>${p.stock} (Limit: ${p.maxBuyLimit || 4})</td>
                 <td><b>${p.soldCount || 0}</b></td>
                 <td style="white-space:nowrap;">
                     <a href="/admin/edit-product/${p._id}" class="btn" style="background:#007bff; padding:3px 6px; font-size:11px; margin-right:4px;">✏️ Edit</a>
-                    <a href="/api/delete-product/${p._id}" class="btn" style="background:#d9534f; padding:3px 6px; font-size:11px;" onclick="return confirm('Delete this product?');">Delete</a>
+                    <a href="/api/delete-product/${p._id}" class="btn" style="background:#d9534f; padding:3px 6px; font-size:11px;" onclick="return confirm('Delete product?');">Delete</a>
                 </td>
             </tr>
         `).join('');
-        
+
         let couponsHTML = coupons.map(c => `
             <tr>
                 <td><b>${c.code}</b></td>
                 <td>৳${c.discountAmount}</td>
-                <td><a href="/api/delete-coupon/${c._id}" class="btn" style="background:#d9534f; padding:3px 6px; font-size:11px;" onclick="return confirm('Delete this coupon?');">Delete</a></td>
+                <td><a href="/api/delete-coupon/${c._id}" class="btn" style="background:#d9534f; padding:3px 6px; font-size:11px;" onclick="return confirm('Delete?');">Delete</a></td>
             </tr>
         `).join('');
-        
+
         let ordersHTML = orders.map(o => {
             let actionButtons = '';
             if (o.status === 'Pending') {
-                actionButtons = `<a href="/api/change-order-status/${o._id}/Confirmed?tab=${activeTab}" class="btn btn-buy" style="padding:4px 8px; font-size:11px; margin-right:4px;">Confirm Order</a>`;
+                actionButtons = `<a href="/api/change-order-status/${o._id}/Confirmed?tab=${activeTab}" class="btn btn-buy" style="padding:4px 8px; font-size:11px; margin-right:4px;">Confirm</a>`;
             } else if (o.status === 'Confirmed') {
-                actionButtons = `<a href="/api/change-order-status/${o._id}/Delivered?tab=${activeTab}" class="btn" style="background:#28a745; padding:4px 8px; font-size:11px; margin-right:4px;">Completed (Delivered)</a>`;
+                actionButtons = `<a href="/api/change-order-status/${o._id}/Delivered?tab=${activeTab}" class="btn" style="background:#28a745; padding:4px 8px; font-size:11px; margin-right:4px;">Delivered</a>`;
             } else if (o.status === 'Trash') {
                 actionButtons = `<a href="/api/restore-order/${o._id}" class="btn" style="background:#17a2b8; padding:4px 8px; font-size:11px; margin-right:4px;">🔄 Restore</a>`;
             }
@@ -1255,52 +1309,43 @@ app.get('/admin-dashboard', async (req, res, next) => {
             let orderItemsHTML = o.items.map(item => `
                 <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
                     ${item.mainImage ? `<img src="/uploads/${item.mainImage}" width="36" height="36" style="object-fit:cover; border-radius:3px; border:1px solid #ccc;">` : ''}
-                    <span><b>${item.productName}</b> (৳${item.price})</span>
+                    <span><b>${item.productName}</b> (Qty: ${item.quantity || 1}) - ৳${item.price}</span>
                 </div>
             `).join('');
+
             return `
                 <tr>
-                    <td>${o._id} <br><a href="/admin/invoice/${o._id}" target="_blank" style="font-size:11px; color:#007bff;">🖨️ Invoice</a></td>
+                    <td>${o._id}</td>
                     <td>${o.userEmail}</td>
                     <td>
                         <div style="margin-bottom:6px;">${orderItemsHTML}</div>
-                        <b>Area:</b> ${o.deliveryArea || 'N/A'} <br>
-                        <b>Price:</b> ৳${o.productPrice || (o.totalAmount - (o.deliveryCharge || 0))} + Delivery: ৳${o.deliveryCharge || 0} ${o.discountPrice ? `- Discount: ৳${o.discountPrice}` : ''} = <b>৳${o.totalAmount}</b> (${o.paymentMethod})<br>
-                        ${o.customerNote ? `<span style="color:#d9534f; font-size:12px;"><b>Note:</b> ${o.customerNote}</span><br>` : ''}
+                        <b>Total:</b> ৳${o.totalAmount} (${o.paymentMethod})<br>
                         <small>Sender: ${o.senderNumber || 'N/A'}, Paid: ৳${o.paidAmount || 0}, TrxID: ${o.trxId || 'N/A'}</small>
                     </td>
                     <td>
-                        <div style="margin-bottom:6px;"><span style="font-weight:bold; color:${o.status === 'Delivered' ? 'green' : (o.status === 'Confirmed' ? '#007bff' : (o.status === 'Cancelled' ? '#dc3545' : (o.status === 'Trash' ? '#6c757d' : '#f85606')))}">${o.status}</span></div>
+                        <div style="margin-bottom:6px;"><span style="font-weight:bold; color:#f85606;">${o.status}</span></div>
                         ${actionButtons}
                         <a href="${deleteBtnLink}" class="btn" style="background:#d9534f; padding:4px 8px; font-size:11px;" onclick="return confirm('Are you sure?');">${deleteBtnText}</a>
                     </td>
                 </tr>
             `;
         }).join('');
-        
-        let usersHTML = users.map(u => `
-            <tr>
-                <td>${u.email}</td>
-                <td>${u.isBlocked ? '<span style="color:red; font-weight:bold;">Blocked</span>' : '<span style="color:green;">Active</span>'}</td>
-                <td>
-                    <a href="/api/toggle-block/${u._id}" class="btn" style="background:${u.isBlocked ? '#28a745' : '#d9534f'}; padding:3px 6px; font-size:11px;">
-                        ${u.isBlocked ? 'Unblock' : 'Block COD'}
-                    </a>
-                </td>
-            </tr>
-        `).join('');
-        
+
         let chatsHTML = chats.map(c => `
-            <div style="background:#f9f9f9; padding:10px; margin-bottom:10px; border-radius:4px; font-size:13px;">
-                <p style="margin:0 0 4px 0;"><b>Product:</b> ${c.productName} | <b>User:</b> ${c.userEmail}</p>
-                <p style="margin:0 0 8px 0;"><b>Question:</b> ${c.message}</p>
-                <form action="/api/reply-chat" method="POST" style="display:flex; gap:5px;">
-                    <input type="hidden" name="chatId" value="${c._id}">
-                    <input type="text" name="reply" value="${c.reply || ''}" placeholder="Write reply..." style="padding:5px; flex:1; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                    <button type="submit" class="btn" style="padding:5px 10px; font-size:12px;">Reply</button>
-                </form>
+            <div style="background:#f9f9f9; padding:10px; margin-bottom:10px; border-radius:4px; font-size:13px; display:flex; gap:10px; align-items:flex-start;">
+                ${c.productImage ? `<img src="/uploads/${c.productImage}" width="50" height="50" style="object-fit:cover; border-radius:4px;">` : ''}
+                <div style="flex:1;">
+                    <p style="margin:0 0 4px 0;"><b>Product:</b> ${c.productName} | <b>User:</b> ${c.userEmail}</p>
+                    <p style="margin:0 0 8px 0;"><b>Question:</b> ${c.message}</p>
+                    <form action="/api/reply-chat" method="POST" style="display:flex; gap:5px;">
+                        <input type="hidden" name="chatId" value="${c._id}">
+                        <input type="text" name="reply" value="${c.reply || ''}" placeholder="Write reply..." style="padding:5px; flex:1; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
+                        <button type="submit" class="btn" style="padding:5px 10px; font-size:12px;">Reply</button>
+                    </form>
+                </div>
             </div>
         `).join('');
+
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -1310,134 +1355,76 @@ app.get('/admin-dashboard', async (req, res, next) => {
                 <div class="container">
                     <h3 style="margin-bottom:15px;">⚙️ Admin Control Dashboard</h3>
                     
-                    <div style="display:flex; gap:12px; margin-bottom:15px; flex-wrap:wrap;">
-                        <div style="background:white; padding:12px; border-radius:6px; flex:1; min-width:140px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-                            <h4 style="margin:0; font-size:13px; color:#666;">Total Sold Items</h4>
-                            <p style="font-size:20px; color:#f85606; font-weight:bold; margin:5px 0 0 0;">${totalSoldItems}</p>
-                        </div>
-                        <div style="background:white; padding:12px; border-radius:6px; flex:1; min-width:140px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-                            <h4 style="margin:0; font-size:13px; color:#666;">Total Revenue (Delivered)</h4>
-                            <p style="font-size:20px; color:#28a745; font-weight:bold; margin:5px 0 0 0;">৳${totalRevenue}</p>
-                        </div>
-                        <div style="background:white; padding:12px; border-radius:6px; flex:1; min-width:140px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-                            <h4 style="margin:0; font-size:13px; color:#666;">Low Stock Alerts</h4>
-                            <p style="font-size:20px; color:red; font-weight:bold; margin:5px 0 0 0;">${lowStockCount}</p>
-                        </div>
-                    </div>
                     <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
-                        <h4 style="margin-top:0;">💳 বিকাশ ও নগদ পেমেন্ট নম্বর সেটিংস</h4>
-                        <form action="/api/save-payment-settings" method="POST" style="display:grid; gap:8px; max-width:500px;">
-                            <label style="font-size:12px; font-weight:600;">বিকাশ পার্সোনাল/মার্চেন্ট নম্বর:</label>
-                            <input type="text" name="bkashNumber" value="${siteSetting.bkashNumber}" placeholder="017xxxxxxxx" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                            
-                            <label style="font-size:12px; font-weight:600;">নগদ পার্সোনাল/মার্চেন্ট নম্বর:</label>
-                            <input type="text" name="nagadNumber" value="${siteSetting.nagadNumber}" placeholder="018xxxxxxxx" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                            
-                            <button type="submit" class="btn" style="padding:8px; background:#28a745;">Save Payment Settings</button>
-                        </form>
-                    </div>
-                    <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
-                        <h4 style="margin-top:0;">🌐 Facebook Page & API Settings</h4>
-                        <form action="/api/save-fb-settings" method="POST" style="display:grid; gap:8px; max-width:500px;">
-                            <label style="font-size:12px; font-weight:600;">Facebook Page ID:</label>
-                            <input type="text" name="pageId" value="${siteSetting.pageId}" placeholder="Enter FB Page ID" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                            
-                            <label style="font-size:12px; font-weight:600;">Facebook Access Token:</label>
-                            <input type="text" name="accessToken" value="${siteSetting.accessToken}" placeholder="Enter Page Access Token" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                            
-                            <button type="submit" class="btn" style="padding:8px; background:#4267B2;">Save FB Settings</button>
-                        </form>
-                    </div>
-                    <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
-                        <h4 style="margin-top:0;">🎟️ Create Discount Coupon Code</h4>
-                        <form action="/api/add-coupon" method="POST" style="display:flex; gap:10px; max-width:500px; flex-wrap:wrap;">
-                            <input type="text" name="code" placeholder="Coupon Code (e.g. EID100)" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px; flex:1;" required>
-                            <input type="number" name="discountAmount" placeholder="Discount (Tk)" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px; width:120px;" required>
-                            <button type="submit" class="btn" style="padding:8px 14px;">Add Coupon</button>
-                        </form>
-                        <div style="margin-top:10px; max-width:500px; overflow-x:auto;">
-                            <table border="1" cellpadding="5" style="width:100%; border-collapse:collapse; font-size:12px;">
-                                <tr><th>Code</th><th>Discount</th><th>Action</th></tr>
-                                ${couponsHTML.length ? couponsHTML : '<tr><td colspan="3" style="text-align:center;">No coupons created.</td></tr>'}
-                            </table>
-                        </div>
-                    </div>
-                    <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
-                        <h4 style="margin-top:0;">📦 Add New Product (৫টি পর্যন্ত গ্যালারি ছবি যুক্ত করার সুবিধা)</h4>
-                        <form action="/api/add-product" method="POST" enctype="multipart/form-data" style="display:grid; gap:8px; max-width:500px;">
-                            <input type="text" name="name" placeholder="Product Name" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                            <select name="category" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                                <option value="Fashion">ফ্যাশন (Fashion)</option>
-                                <option value="Supershop">সুপার শপ (Supershop)</option>
-                                <option value="Pharmacy">ফার্মেসি (Pharmacy)</option>
-                                <option value="Food">খাদ্যপণ্য (Food)</option>
-                                <option value="Sports">স্পোর্টস (Sports)</option>
-                                <option value="Books">বই (Books)</option>
-                                <option value="Stationery">স্টেশনারি (Stationery)</option>
-                                <option value="HomeDecor">হোম ডেকোর ও ফার্নিচার (Home Decor & Furniture)</option>
-                                <option value="BeautyCare">বিউটি পার্লার কেয়ার (Beauty Care)</option>
-                                <option value="Electric">ইলেকট্রিক (Electric)</option>
-                            </select>
-                            <input type="number" name="price" placeholder="Price (Tk)" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                            <input type="number" name="stock" placeholder="Stock Quantity" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                            <textarea name="description" placeholder="Product Description" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;"></textarea>
+                        <h4 style="margin-top:0;">➕ Upload New Product</h4>
+                        <form action="/api/add-product" method="POST" enctype="multipart/form-data" style="display:grid; gap:10px; max-width:600px;">
+                            <input type="text" name="name" placeholder="Product Name" style="padding:8px; border:1px solid #ccc; border-radius:4px;" required>
+                            <input type="text" name="category" placeholder="Category (e.g. Fashion, Supershop)" style="padding:8px; border:1px solid #ccc; border-radius:4px;" required>
+                            <input type="number" name="price" placeholder="Price (Tk)" style="padding:8px; border:1px solid #ccc; border-radius:4px;" required>
+                            <input type="number" name="stock" placeholder="Stock Quantity" style="padding:8px; border:1px solid #ccc; border-radius:4px;" required>
+                            <input type="number" name="maxBuyLimit" placeholder="Max Buy Limit per Customer (e.g. 4)" value="4" style="padding:8px; border:1px solid #ccc; border-radius:4px;" required>
+                            <textarea name="description" placeholder="Description" style="padding:8px; border:1px solid #ccc; border-radius:4px; height:60px;"></textarea>
                             
                             <label style="font-size:12px; font-weight:600;">Main Image:</label>
-                            <input type="file" name="mainImage" accept="image/*" style="font-size:12px;" required>
+                            <input type="file" name="mainImage" required>
                             
-                            <label style="font-size:12px; font-weight:600;">Gallery Images (Up to 5 images):</label>
-                            <input type="file" name="gallery" accept="image/*" multiple max="5" style="font-size:12px;">
+                            <label style="font-size:12px; font-weight:600;">Gallery Images (Multiple variants/colors):</label>
+                            <input type="file" name="gallery" multiple>
                             
-                            <button type="submit" class="btn" style="padding:8px;">Upload Product</button>
+                            <button type="submit" class="btn" style="background:#28a745;">Upload Product</button>
                         </form>
                     </div>
+
+                    <!-- Products List -->
                     <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
-                        <h4 style="margin-top:0;">🎬 Add Facebook Post / Reels Video</h4>
-                        <form action="/api/add-fb-content" method="POST" enctype="multipart/form-data" style="display:grid; gap:8px; max-width:500px;">
-                            <input type="text" name="title" placeholder="Post Title / Description" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                            <input type="text" name="productLink" placeholder="Product Link (e.g. /product/ID or /)" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
-                            <select name="mediaType" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                                <option value="image">Image</option>
-                                <option value="reels">Reels Video</option>
-                            </select>
-                            <input type="file" name="mediaFile" accept="image/*,video/*" style="font-size:12px;" required>
-                            <button type="submit" class="btn" style="padding:8px;">Publish FB Content</button>
-                        </form>
-                    </div>
-                    <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; overflow-x:auto;">
-                        <h4 style="margin-top:0;">📋 Manage Products & Sold Tracking</h4>
-                        <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
-                            <tr><th>Img</th><th>Name</th><th>Price</th><th>Stock</th><th>Sold</th><th>Action</th></tr>
-                            ${productsHTML}
-                        </table>
-                    </div>
-                    <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
-                        <h4 style="margin-top:0;">🛍️ Customer Orders Management (ছবিসহ পণ্যের বিবরণ)</h4>
-                        <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
-                            <a href="/admin-dashboard?tab=pending" class="btn" style="background:${activeTab === 'pending' ? '#f85606' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">⏳ Pending (${pendingCount})</a>
-                            <a href="/admin-dashboard?tab=confirmed" class="btn" style="background:${activeTab === 'confirmed' ? '#007bff' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">📦 Confirmed (${confirmedCount})</a>
-                            <a href="/admin-dashboard?tab=completed" class="btn" style="background:${activeTab === 'completed' ? '#28a745' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">✅ Completed (${completedCount})</a>
-                            <a href="/admin-dashboard?tab=cancelled" class="btn" style="background:${activeTab === 'cancelled' ? '#dc3545' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">❌ Cancelled (${cancelledCount})</a>
-                            <a href="/admin-dashboard?tab=trash" class="btn" style="background:${activeTab === 'trash' ? '#6c757d' : '#ccc'}; text-decoration:none; padding:8px 14px; font-size:13px;">🗑️ Trash (${trashCount})</a>
-                        </div>
+                        <h4 style="margin-top:0;">📦 Manage Products</h4>
                         <div style="overflow-x:auto;">
-                            <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
-                                <tr><th>Order ID</th><th>Customer</th><th>Details & Payment</th><th>Status & Actions</th></tr>
-                                ${ordersHTML.length ? ordersHTML : '<tr><td colspan="4" style="text-align:center; padding:20px; color:#777;">No orders found in this section.</td></tr>'}
+                            <table border="1" cellpadding="8" style="width:100%; border-collapse:collapse; font-size:13px;">
+                                <tr><th>Image</th><th>Name</th><th>Price</th><th>Stock</th><th>Sold</th><th>Action</th></tr>
+                                ${productsHTML}
                             </table>
                         </div>
                     </div>
-                    <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; overflow-x:auto;">
-                        <h4 style="margin-top:0;">🚫 User Blocklist</h4>
-                        <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
-                            <tr><th>User Email</th><th>COD Status</th><th>Action</th></tr>
-                            ${usersHTML.length ? usersHTML : '<tr><td colspan="3" style="text-align:center;">No users registered yet.</td></tr>'}
-                        </table>
-                    </div>
+
+                    <!-- Orders Tab Menu -->
                     <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
-                        <h4 style="margin-top:0;">💬 Customer Chatbox Inbox Queries & Replies</h4>
-                        ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions asked yet.</p>'}
+                        <h4 style="margin-top:0;">📋 Orders Management</h4>
+                        <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+                            <a href="/admin-dashboard?tab=pending" class="btn" style="background:${activeTab==='pending'?'#f85606':'#6c757d'}; padding:6px 12px; font-size:12px;">Pending Orders</a>
+                            <a href="/admin-dashboard?tab=confirmed" class="btn" style="background:${activeTab==='confirmed'?'#f85606':'#6c757d'}; padding:6px 12px; font-size:12px;">Confirmed Orders</a>
+                            <a href="/admin-dashboard?tab=completed" class="btn" style="background:${activeTab==='completed'?'#f85606':'#6c757d'}; padding:6px 12px; font-size:12px;">Completed Orders</a>
+                            <a href="/admin-dashboard?tab=cancelled" class="btn" style="background:${activeTab==='cancelled'?'#f85606':'#6c757d'}; padding:6px 12px; font-size:12px;">Cancelled Orders</a>
+                            <a href="/admin-dashboard?tab=trash" class="btn" style="background:${activeTab==='trash'?'#f85606':'#6c757d'}; padding:6px 12px; font-size:12px;">Trash Bin</a>
+                        </div>
+                        <div style="overflow-x:auto;">
+                            <table border="1" cellpadding="8" style="width:100%; border-collapse:collapse; font-size:13px;">
+                                <tr><th>Order ID</th><th>Customer</th><th>Details & Items</th><th>Action</th></tr>
+                                ${ordersHTML.length ? ordersHTML : '<tr><td colspan="4" style="text-align:center;">No orders found in this section.</td></tr>'}
+                            </table>
+                        </div>
                     </div>
+
+                    <!-- Customer Inquiries / Q&A Management -->
+                    <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
+                        <h4 style="margin-top:0;">💬 Customer Q&A & Product Inquiries</h4>
+                        <div>${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No customer inquiries.</p>'}</div>
+                    </div>
+
+                    <!-- Facebook Auto-Poster Settings -->
+                    <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
+                        <h4 style="margin-top:0;">🌐 Facebook Page Auto-Poster</h4>
+                        <form action="/api/post-to-fb" method="POST" enctype="multipart/form-data" style="display:grid; gap:10px; max-width:500px;">
+                            <input type="text" name="title" placeholder="Post Caption / Title" style="padding:8px; border:1px solid #ccc; border-radius:4px;" required>
+                            <select name="mediaType" style="padding:8px; border:1px solid #ccc; border-radius:4px;">
+                                <option value="image">Image</option>
+                                <option value="video">Video</option>
+                            </select>
+                            <input type="file" name="media" required>
+                            <input type="text" name="productLink" placeholder="Product Link (e.g. /product/...) " style="padding:8px; border:1px solid #ccc; border-radius:4px;">
+                            <button type="submit" class="btn" style="background:#4267B2;">Publish to Facebook & Site</button>
+                        </form>
+                    </div>
+
                 </div>
             </body>
             </html>
@@ -1447,69 +1434,11 @@ app.get('/admin-dashboard', async (req, res, next) => {
     }
 });
 
-// ================= Admin Action Endpoints =================
-app.post('/api/save-payment-settings', async (req, res, next) => {
-    try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        const { bkashNumber, nagadNumber } = req.body;
-        let setting = await SiteSetting.findOne();
-        if (setting) {
-            setting.bkashNumber = bkashNumber.trim();
-            setting.nagadNumber = nagadNumber.trim();
-            await setting.save();
-        } else {
-            await new SiteSetting({ bkashNumber: bkashNumber.trim(), nagadNumber: nagadNumber.trim() }).save();
-        }
-        res.send(`<script>alert('Payment numbers updated successfully!'); window.location.href='/admin-dashboard';</script>`);
-    } catch (err) {
-        next(err);
-    }
-});
-
-app.post('/api/save-fb-settings', async (req, res, next) => {
-    try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        const { pageId, accessToken } = req.body;
-        let setting = await SiteSetting.findOne();
-        if (setting) {
-            setting.pageId = pageId.trim();
-            setting.accessToken = accessToken.trim();
-            await setting.save();
-        } else {
-            await new SiteSetting({ pageId: pageId.trim(), accessToken: accessToken.trim() }).save();
-        }
-        res.send(`<script>alert('Facebook settings saved successfully!'); window.location.href='/admin-dashboard';</script>`);
-    } catch (err) {
-        next(err);
-    }
-});
-
-app.post('/api/add-coupon', async (req, res, next) => {
-    try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        const { code, discountAmount } = req.body;
-        await new Coupon({ code: code.trim(), discountAmount: Number(discountAmount) }).save();
-        res.redirect('/admin-dashboard');
-    } catch (err) {
-        next(err);
-    }
-});
-
-app.get('/api/delete-coupon/:id', async (req, res, next) => {
-    try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        await Coupon.findByIdAndDelete(req.params.id);
-        res.redirect('/admin-dashboard');
-    } catch (err) {
-        next(err);
-    }
-});
-
-// Product Add Endpoint with Multer fields configuration for up to 5 gallery images
+// Admin Product & Order Action Endpoints
 app.post('/api/add-product', upload.fields([{ name: 'mainImage', maxCount: 1 }, { name: 'gallery', maxCount: 5 }]), async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        const { name, category, price, stock, description } = req.body;
+        const { name, category, price, stock, maxBuyLimit, description } = req.body;
         let mainImage = req.files['mainImage'] ? req.files['mainImage'][0].filename : '';
         let gallery = req.files['gallery'] ? req.files['gallery'].map(file => file.filename) : [];
         
@@ -1518,27 +1447,10 @@ app.post('/api/add-product', upload.fields([{ name: 'mainImage', maxCount: 1 }, 
             category,
             price: Number(price),
             stock: Number(stock),
+            maxBuyLimit: Number(maxBuyLimit) || 4,
             description,
             mainImage,
             gallery
-        }).save();
-        
-        res.redirect('/admin-dashboard');
-    } catch (err) {
-        next(err);
-    }
-});
-
-app.post('/api/add-fb-content', upload.single('mediaFile'), async (req, res, next) => {
-    try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        const { title, productLink, mediaType } = req.body;
-        let mediaUrl = req.file ? req.file.filename : '';
-        await new FbContent({
-            title,
-            mediaUrl,
-            mediaType,
-            productLink: productLink || '/'
         }).save();
         res.redirect('/admin-dashboard');
     } catch (err) {
@@ -1559,16 +1471,13 @@ app.get('/api/delete-product/:id', async (req, res, next) => {
 app.get('/api/change-order-status/:id/:status', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        let orderId = req.params.id;
-        let newStatus = req.params.status;
-        let tab = req.query.tab || 'pending';
-        let order = await Order.findById(orderId);
+        let order = await Order.findById(req.params.id);
         if (order) {
-            order.previousStatus = order.status;
-            order.status = newStatus;
+            order.status = req.params.status;
+            order.previousStatus = req.params.status;
             await order.save();
         }
-        res.redirect('/admin-dashboard?tab=' + tab);
+        res.redirect('/admin-dashboard?tab=' + (req.query.tab || 'pending'));
     } catch (err) {
         next(err);
     }
@@ -1613,20 +1522,6 @@ app.get('/api/permanent-delete-order/:id', async (req, res, next) => {
     }
 });
 
-app.get('/api/toggle-block/:id', async (req, res, next) => {
-    try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        let user = await User.findById(req.params.id);
-        if (user) {
-            user.isBlocked = !user.isBlocked;
-            await user.save();
-        }
-        res.redirect('/admin-dashboard');
-    } catch (err) {
-        next(err);
-    }
-});
-
 app.post('/api/reply-chat', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
@@ -1638,150 +1533,32 @@ app.post('/api/reply-chat', async (req, res, next) => {
     }
 });
 
-// ================= Invoice / Cash Memo Route =================
-app.get('/admin/invoice/:id', async (req, res, next) => {
+app.post('/api/post-to-fb', upload.single('media'), async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        let order = await Order.findById(req.params.id);
-        if (!order) return res.send('Order not found');
-        let itemsListHTML = order.items.map(i => `
-            <tr>
-                <td style="padding:8px; border-bottom:1px solid #ddd; display:flex; align-items:center; gap:8px;">
-                    ${i.mainImage ? `<img src="/uploads/${i.mainImage}" width="35" height="35" style="object-fit:cover; border-radius:3px;">` : ''}
-                    <span>${i.productName}</span>
-                </td>
-                <td style="padding:8px; border-bottom:1px solid #ddd; text-align:center;">1</td>
-                <td style="padding:8px; border-bottom:1px solid #ddd; text-align:right;">৳${i.price}</td>
-            </tr>
-        `).join('');
-        res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Invoice - ${order._id}</title>
-                <style>
-                    body { font-family: sans-serif; padding: 20px; background: #fff; color: #333; }
-                    .invoice-box { max-width: 700px; margin: auto; padding: 30px; border: 1px solid #eee; box-shadow: 0 0 10px rgba(0, 0, 0, 0.15); }
-                    .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
-                    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                    th { background: #f85606; color: white; text-align: left; padding: 8px; }
-                    .totals { margin-top: 20px; text-align: right; }
-                    @media print { body { padding: 0; } .invoice-box { border: none; box-shadow: none; } .no-print { display: none; } }
-                </style>
-            </head>
-            <body>
-                <div class="invoice-box">
-                    <div class="header">
-                        <div>
-                            <h2>🛒 Online Shop Invoice</h2>
-                            <p style="font-size:12px; color:#666;">Order ID: ${order._id}<br>Date: ${new Date(order.createdAt).toLocaleString()}</p>
-                        </div>
-                        <div style="text-align:right;">
-                            <p><b>Customer Email:</b> ${order.userEmail}</p>
-                            <p><b>Delivery Area:</b> ${order.deliveryArea || 'N/A'}</p>
-                        </div>
-                    </div>
-                    
-                    <table>
-                        <tr>
-                            <th>Item Description</th>
-                            <th style="text-align:center;">Qty</th>
-                            <th style="text-align:right;">Price</th>
-                        </tr>
-                        ${itemsListHTML}
-                    </table>
-                    
-                    <div class="totals">
-                        <p>Product Subtotal: ৳${order.productPrice || (order.totalAmount - order.deliveryCharge)}</p>
-                        <p>Delivery Charge (${order.deliveryArea}): ৳${order.deliveryCharge}</p>
-                        ${order.discountPrice ? `<p>Coupon Discount: -৳${order.discountPrice}</p>` : ''}
-                        <h3>Total Amount: ৳${order.totalAmount}</h3>
-                        <p style="font-size:13px; color:#555;">Payment Method: <b>${order.paymentMethod}</b> ${order.senderNumber ? `(Sender: ${order.senderNumber}, Paid: ৳${order.paidAmount})` : ''}</p>
-                        ${order.customerNote ? `<p style="font-size:13px; color:red;"><b>Note:</b> ${order.customerNote}</p>` : ''}
-                    </div>
-                    
-                    <div class="no-print" style="margin-top:30px; text-align:center;">
-                        <button onclick="window.print()" style="background:#f85606; color:white; border:none; padding:10px 20px; font-size:16px; border-radius:4px; cursor:pointer;">🖨️ Print Invoice</button>
-                    </div>
-                </div>
-            </body>
-            </html>
-        `);
-    } catch (err) {
-        next(err);
-    }
-});
-
-// ================= Product Edit Route =================
-app.get('/admin/edit-product/:id', async (req, res, next) => {
-    try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        let product = await Product.findById(req.params.id);
-        if (!product) return res.send('Product not found');
-        res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head><title>Edit Product - ${product.name}</title>${globalHeaderHTML}</head>
-            <body>
-                ${getNavbarHTML(req.user)}
-                <div class="container" style="max-width:600px; background:white; padding:20px; border-radius:6px;">
-                    <h3 style="margin-top:0;">✏️ Edit Product Information</h3>
-                    <form action="/api/update-product/${product._id}" method="POST" style="display:grid; gap:10px;">
-                        <label style="font-size:13px; font-weight:600;">Product Name:</label>
-                        <input type="text" name="name" value="${product.name}" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>
-                        
-                        <label style="font-size:13px; font-weight:600;">Category:</label>
-                        <select name="category" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>
-                            <option value="Fashion" ${product.category === 'Fashion' ? 'selected' : ''}>ফ্যাশন (Fashion)</option>
-                            <option value="Supershop" ${product.category === 'Supershop' ? 'selected' : ''}>সুপার শপ (Supershop)</option>
-                            <option value="Pharmacy" ${product.category === 'Pharmacy' ? 'selected' : ''}>ফার্মেসি (Pharmacy)</option>
-                            <option value="Food" ${product.category === 'Food' ? 'selected' : ''}>খাদ্যপণ্য (Food)</option>
-                            <option value="Sports" ${product.category === 'Sports' ? 'selected' : ''}>স্পোর্টস (Sports)</option>
-                            <option value="Books" ${product.category === 'Books' ? 'selected' : ''}>বই (Books)</option>
-                            <option value="Stationery" ${product.category === 'Stationery' ? 'selected' : ''}>স্টেশনারি (Stationery)</option>
-                            <option value="HomeDecor" ${product.category === 'HomeDecor' ? 'selected' : ''}>হোম ডেকোর ও ফার্নিচার (Home Decor & Furniture)</option>
-                            <option value="BeautyCare" ${product.category === 'BeautyCare' ? 'selected' : ''}>বিউটি পার্লার কেয়ার (Beauty Care)</option>
-                            <option value="Electric" ${product.category === 'Electric' ? 'selected' : ''}>ইলেকট্রিক (Electric)</option>
-                        </select>
-                        
-                        <label style="font-size:13px; font-weight:600;">Price (Tk):</label>
-                        <input type="number" name="price" value="${product.price}" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>
-                        
-                        <label style="font-size:13px; font-weight:600;">Stock:</label>
-                        <input type="number" name="stock" value="${product.stock}" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required>
-                        
-                        <label style="font-size:13px; font-weight:600;">Description:</label>
-                        <textarea name="description" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px; height:80px;">${product.description}</textarea>
-                        
-                        <button type="submit" class="btn" style="padding:10px; margin-top:5px;">Update Product</button>
-                    </form>
-                </div>
-            </body>
-            </html>
-        `);
-    } catch (err) {
-        next(err);
-    }
-});
-
-app.post('/api/update-product/:id', async (req, res, next) => {
-    try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        const { name, category, price, stock, description } = req.body;
-        await Product.findByIdAndUpdate(req.params.id, {
-            name,
-            category,
-            price: Number(price),
-            stock: Number(stock),
-            description
-        });
+        const { title, mediaType, productLink } = req.body;
+        let mediaUrl = req.file ? req.file.filename : '';
+        
+        await new FbContent({
+            title,
+            mediaUrl,
+            mediaType,
+            productLink: productLink || '/'
+        }).save();
+        
         res.redirect('/admin-dashboard');
     } catch (err) {
         next(err);
     }
 });
 
-// ================= Server Listening =================
+// ================= Global Error Handler =================
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).send(`<h3 style="color:red; text-align:center; margin-top:50px;">Something went wrong! Server Error.</h3><p style="text-align:center;"><a href="/">Go Back Home</a></p>`);
+});
+
+// ================= Server Startup =================
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
