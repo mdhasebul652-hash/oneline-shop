@@ -4,8 +4,6 @@ const cookieParser = require('cookie-parser');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const path = require('path');
-const fs = require('fs');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -22,25 +20,16 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Ensure uploads directory exists safely
-const uploadDir = path.join(__dirname, 'public', 'uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
-
 // Multer Storage Configuration
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, uploadDir);
+        cb(null, 'public/uploads');
     },
     filename: (req, file, cb) => {
-        cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname));
+        cb(null, Date.now() + '-' + file.originalname);
     }
 });
-const upload = multer({ 
-    storage: storage,
-    limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit to prevent heavy payload crashes
-});
+const upload = multer({ storage: storage });
 
 // ================= Mongoose Schemas & Models =================
 const userSchema = new mongoose.Schema({
@@ -120,6 +109,13 @@ const fbContentSchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now }
 });
 const FbContent = mongoose.model('FbContent', fbContentSchema);
+
+// New Schema for Facebook Settings (Page ID & Token)
+const fbSettingSchema = new mongoose.Schema({
+    pageId: { type: String, default: '' },
+    accessToken: { type: String, default: '' }
+});
+const FbSetting = mongoose.model('FbSetting', fbSettingSchema);
 
 // Middleware to load logged-in user
 app.use(async (req, res, next) => {
@@ -822,6 +818,8 @@ app.get('/admin-dashboard', async (req, res) => {
     let chats = await Chat.find().sort({ _id: -1 });
     let users = await User.find({ role: 'user' });
     let coupons = await Coupon.find().sort({ _id: -1 });
+    let fbSetting = await FbSetting.findOne() || { pageId: '', accessToken: '' };
+    
     let pendingCount = await Order.countDocuments({ status: 'Pending' });
     let confirmedCount = await Order.countDocuments({ status: 'Confirmed' });
     let completedCount = await Order.countDocuments({ status: 'Delivered' });
@@ -837,6 +835,7 @@ app.get('/admin-dashboard', async (req, res) => {
     let lowStockCount = products.filter(p => p.stock < 5).length;
     let totalSoldItems = products.reduce((acc, p) => acc + (p.soldCount || 0), 0);
     let totalRevenue = allDeliveredOrders.reduce((acc, o) => acc + (o.totalAmount || 0), 0);
+    
     let productsHTML = products.map(p => `
         <tr style="${p.stock < 5 ? 'background:#fff3cd;' : ''}">
             <td><img src="/uploads/${p.mainImage}" width="35" height="35" style="object-fit:cover; border-radius:3px;"></td>
@@ -850,6 +849,7 @@ app.get('/admin-dashboard', async (req, res) => {
             </td>
         </tr>
     `).join('');
+    
     let couponsHTML = coupons.map(c => `
         <tr>
             <td><b>${c.code}</b></td>
@@ -857,6 +857,7 @@ app.get('/admin-dashboard', async (req, res) => {
             <td><a href="/api/delete-coupon/${c._id}" class="btn" style="background:#d9534f; padding:3px 6px; font-size:11px;" onclick="return confirm('Delete this coupon?');">Delete</a></td>
         </tr>
     `).join('');
+    
     let ordersHTML = orders.map(o => {
         let actionButtons = '';
         if (o.status === 'Pending') {
@@ -886,6 +887,7 @@ app.get('/admin-dashboard', async (req, res) => {
             </tr>
         `;
     }).join('');
+    
     let usersHTML = users.map(u => `
         <tr>
             <td>${u.email}</td>
@@ -897,6 +899,7 @@ app.get('/admin-dashboard', async (req, res) => {
             </td>
         </tr>
     `).join('');
+    
     let chatsHTML = chats.map(c => `
         <div style="background:#f9f9f9; padding:10px; margin-bottom:10px; border-radius:4px; font-size:13px;">
             <p style="margin:0 0 4px 0;"><b>Product:</b> ${c.productName} | <b>User:</b> ${c.userEmail}</p>
@@ -908,6 +911,7 @@ app.get('/admin-dashboard', async (req, res) => {
             </form>
         </div>
     `).join('');
+
     res.send(`
         <!DOCTYPE html>
         <html>
@@ -931,6 +935,21 @@ app.get('/admin-dashboard', async (req, res) => {
                         <p style="font-size:20px; color:red; font-weight:bold; margin:5px 0 0 0;">${lowStockCount}</p>
                     </div>
                 </div>
+
+                <!-- Facebook API Credentials Configuration Panel -->
+                <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
+                    <h4 style="margin-top:0;">🌐 Facebook Page & API Settings</h4>
+                    <form action="/api/save-fb-settings" method="POST" style="display:grid; gap:8px; max-width:500px;">
+                        <label style="font-size:12px; font-weight:600;">Facebook Page ID:</label>
+                        <input type="text" name="pageId" value="${fbSetting.pageId}" placeholder="Enter FB Page ID" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
+                        
+                        <label style="font-size:12px; font-weight:600;">Facebook Access Token:</label>
+                        <input type="text" name="accessToken" value="${fbSetting.accessToken}" placeholder="Enter Page Access Token" style="padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
+                        
+                        <button type="submit" class="btn" style="padding:8px; background:#4267B2;">Save FB Settings</button>
+                    </form>
+                </div>
+
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
                     <h4 style="margin-top:0;">🎟️ Create Discount Coupon Code</h4>
                     <form action="/api/add-coupon" method="POST" style="display:flex; gap:10px; max-width:500px; flex-wrap:wrap;">
@@ -945,6 +964,7 @@ app.get('/admin-dashboard', async (req, res) => {
                         </table>
                     </div>
                 </div>
+
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
                     <h4 style="margin-top:0;">📦 Add New Product</h4>
                     <form action="/api/add-product" method="POST" enctype="multipart/form-data" style="display:grid; gap:8px; max-width:500px;">
@@ -974,6 +994,7 @@ app.get('/admin-dashboard', async (req, res) => {
                         <button type="submit" class="btn" style="padding:8px;">Upload Product</button>
                     </form>
                 </div>
+
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
                     <h4 style="margin-top:0;">🎬 Add Facebook Post / Reels Video</h4>
                     <form action="/api/add-fb-content" method="POST" enctype="multipart/form-data" style="display:grid; gap:8px; max-width:500px;">
@@ -987,6 +1008,7 @@ app.get('/admin-dashboard', async (req, res) => {
                         <button type="submit" class="btn" style="padding:8px;">Publish FB Content</button>
                     </form>
                 </div>
+
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; overflow-x:auto;">
                     <h4 style="margin-top:0;">📋 Manage Products & Sold Tracking</h4>
                     <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
@@ -994,6 +1016,7 @@ app.get('/admin-dashboard', async (req, res) => {
                         ${productsHTML}
                     </table>
                 </div>
+
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
                     <h4 style="margin-top:0;">🛍️ Customer Orders Management</h4>
                     
@@ -1011,6 +1034,7 @@ app.get('/admin-dashboard', async (req, res) => {
                         </table>
                     </div>
                 </div>
+
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; overflow-x:auto;">
                     <h4 style="margin-top:0;">🚫 User Blocklist</h4>
                     <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; font-size:13px;">
@@ -1018,6 +1042,7 @@ app.get('/admin-dashboard', async (req, res) => {
                         ${usersHTML.length ? usersHTML : '<tr><td colspan="3" style="text-align:center;">No users registered yet.</td></tr>'}
                     </table>
                 </div>
+
                 <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px;">
                     <h4 style="margin-top:0;">💬 Customer Chatbox Inbox Queries</h4>
                     ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions asked yet.</p>'}
@@ -1026,6 +1051,29 @@ app.get('/admin-dashboard', async (req, res) => {
         </body>
         </html>
     `);
+});
+
+// Route to Save Facebook Page ID and Token
+app.post('/api/save-fb-settings', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        const { pageId, accessToken } = req.body;
+        
+        let setting = await FbSetting.findOne();
+        if (setting) {
+            setting.pageId = pageId.trim();
+            setting.accessToken = accessToken.trim();
+            await setting.save();
+        } else {
+            await new FbSetting({
+                pageId: pageId.trim(),
+                accessToken: accessToken.trim()
+            }).save();
+        }
+        res.send(`<script>alert('Facebook settings saved successfully!'); window.location.href='/admin-dashboard';</script>`);
+    } catch (err) {
+        next(err);
+    }
 });
 
 app.post('/api/add-coupon', async (req, res, next) => {
@@ -1192,39 +1240,23 @@ app.post('/api/update-product/:id', async (req, res, next) => {
     }
 });
 
-// FIXED PRODUCT UPLOAD ROUTE WITH SAFE NULL CHECKS
-app.post('/api/add-product', upload.fields([{ name: 'mainImage', maxCount: 1 }, { name: 'gallery', maxCount: 5 }]), async (req, res, next) => {
-    try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        
-        const { name, category, price, stock, description } = req.body;
-        
-        // Safe check for uploaded files to prevent Internal Server Error crashes
-        let mainImage = '';
-        if (req.files && req.files['mainImage'] && req.files['mainImage'][0]) {
-            mainImage = req.files['mainImage'][0].filename;
-        }
-
-        let gallery = [];
-        if (req.files && req.files['gallery']) {
-            gallery = req.files['gallery'].map(file => file.filename);
-        }
-        
-        await new Product({
-            name,
-            category,
-            price: Number(price),
-            stock: Number(stock),
-            description: description || '',
-            mainImage,
-            gallery
-        }).save();
-        
-        res.redirect('/admin-dashboard');
-    } catch (err) {
-        console.error("Product upload error:", err);
-        res.send(`<script>alert('Failed to upload product. Please check input fields or image format.'); window.history.back();</script>`);
-    }
+app.post('/api/add-product', upload.fields([{ name: 'mainImage', maxCount: 1 }, { name: 'gallery', maxCount: 5 }]), async (req, res) => {
+    if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+    const { name, category, price, stock, description } = req.body;
+    const mainImage = req.files['mainImage'] ? req.files['mainImage'][0].filename : '';
+    const gallery = req.files['gallery'] ? req.files['gallery'].map(file => file.filename) : [];
+    
+    await new Product({
+        name,
+        category,
+        price: Number(price),
+        stock: Number(stock),
+        description,
+        mainImage,
+        gallery
+    }).save();
+    
+    res.redirect('/admin-dashboard');
 });
 
 app.get('/api/delete-product/:id', async (req, res) => {
@@ -1310,6 +1342,14 @@ app.post('/api/add-fb-content', upload.single('mediaFile'), async (req, res, nex
         let { title, mediaType, productLink } = req.body;
         let mediaUrl = req.file ? req.file.filename : '';
         
+        // Fetch FB Settings (Page ID & Token saved by admin)
+        let fbSetting = await FbSetting.findOne();
+        let pageId = fbSetting ? fbSetting.pageId : '';
+        let accessToken = fbSetting ? fbSetting.accessToken : '';
+
+        // Here you can use pageId and accessToken to automatically publish to Facebook Graph API if needed
+        // e.g., posting content using fetch/axios to https://graph.facebook.com/${pageId}/feed...
+
         await new FbContent({ 
             title, 
             mediaUrl, 
