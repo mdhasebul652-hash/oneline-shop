@@ -54,7 +54,7 @@ const productSchema = new mongoose.Schema({
     price: { type: Number, required: true },
     stock: { type: Number, required: true },
     maxOrderLimit: { type: Number, default: 5 },
-    customDeliveryCharge: { type: Number, default: 150 },
+    customDeliveryCharge: { type: Number, default: 150 }, // নতুন ফিচার: এডমিন চাইলে পণ্যের জন্য আলাদা ডেলিভারি চার্জ দিতে পারবে
     description: { type: String, default: '' },
     mainImage: { type: String, default: '' },
     gallery: [String],
@@ -108,8 +108,6 @@ const chatSchema = new mongoose.Schema({
     userEmail: String,
     message: String,
     reply: { type: String, default: '' },
-    adminRead: { type: Boolean, default: false },
-    userRead: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now }
 });
 const Chat = mongoose.model('Chat', chatSchema);
@@ -167,7 +165,7 @@ const globalHeaderHTML = `
         .container { max-width: 1200px; margin: 15px auto; padding: 0 10px; width: 100%; }
         .product-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
         .product-card { background: white; padding: 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; flex-direction: column; justify-content: space-between; text-decoration: none; color: inherit; transition: transform 0.2s; }
-        .product-card img { width: 100%; height: 160px; object-fit: contain; background: #fff; border-radius: 4px; }
+        .product-card img { width: 100%; height: 160px; object-fit: cover; border-radius: 4px; }
         .product-card h4 { font-size: 14px; color: #222; margin: 8px 0 4px 0; height: 38px; overflow: hidden; line-height: 1.3; font-weight: 600; }
         .price { color: #f85606; font-size: 16px; font-weight: bold; margin: 4px 0; }
         .btn { background: #f85606; color: white; border: none; padding: 10px 16px; border-radius: 4px; cursor: pointer; text-decoration: none; text-align: center; display: inline-block; font-size: 14px; font-weight: 600; }
@@ -181,7 +179,7 @@ const globalHeaderHTML = `
     </style>
     <div id="imageModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.8); justify-content:center; align-items:center;">
         <span onclick="closeImageModal()" style="position:absolute; top:20px; right:30px; color:#fff; font-size:40px; font-weight:bold; cursor:pointer;">&times;</span>
-        <img id="modalImg" style="max-width:90%; max-height:90%; object-fit:contain; border-radius:6px; box-shadow:0 0 20px rgba(255,255,255,0.3);">
+        <img id="modalImg" style="max-width:90%; max-height:90%; border-radius:6px; box-shadow:0 0 20px rgba(255,255,255,0.3);">
     </div>
     <script>
         function openImageModal(src) {
@@ -226,10 +224,10 @@ const getNavbarHTML = (user) => `
     
     ${user && user.role !== 'admin' ? `
         <div style="position: fixed; bottom: 75px; right: 20px; z-index: 1001;">
-            <button onclick="toggleUserChatBox()" style="background: #f85606; color: white; border: none; border-radius: 50px; padding: 12px 18px; font-size: 15px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 8px; position: relative;">
-                💬 মেসেজ বক্স <span id="userChatBadge" style="display:none; position:absolute; top:-5px; right:-5px; background:red; color:white; border-radius:50%; padding:2px 6px; font-size:10px;">•</span>
+            <button onclick="toggleUserChatBox()" style="background: #f85606; color: white; border: none; border-radius: 50px; padding: 12px 18px; font-size: 15px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 8px;">
+                💬 মেসেজ বক্স
             </button>
-            <div id="userChatModal" style="display: none; position: fixed; bottom: 135px; right: 20px; width: 320px; max-height: 450px; background: white; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.2); z-index: 1002; flex-direction: column; overflow: hidden; border: 1px solid #ddd;">
+            <div id="userChatModal" style="display: none; position: fixed; bottom: 135px; right: 20px; width: 320px; max-height: 450px; background: white; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.2); z-index: 1002; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #ddd;">
                 <div style="background: #f85606; color: white; padding: 12px; font-weight: bold; display: flex; justify-content: space-between; align-items: center;">
                     <span>💬 প্রোডাক্ট ইনবক্স ও চ্যাট</span>
                     <button onclick="toggleUserChatBox()" style="background: none; border: none; color: white; font-size: 16px; cursor: pointer;">✕</button>
@@ -241,18 +239,6 @@ const getNavbarHTML = (user) => `
         </div>
         <script>
             let isChatOpen = false;
-            async function checkUserNotifications() {
-                try {
-                    let res = await fetch('/api/user-chats-json');
-                    let chats = await res.json();
-                    let hasUnread = chats.some(c => c.reply && !c.userRead);
-                    let badge = document.getElementById('userChatBadge');
-                    if(badge) badge.style.display = hasUnread ? 'inline-block' : 'none';
-                } catch(e){}
-            }
-            setInterval(checkUserNotifications, 5000);
-            checkUserNotifications();
-
             async function toggleUserChatBox() {
                 let modal = document.getElementById('userChatModal');
                 isChatOpen = !isChatOpen;
@@ -267,7 +253,7 @@ const getNavbarHTML = (user) => `
                         } else {
                             container.innerHTML = chats.map(c => `
                                 <div style="background: #f9f9f9; padding: 8px; margin-bottom: 8px; border-radius: 6px; border-left: 3px solid #f85606; display: flex; gap: 8px; align-items: center;">
-                                    ${c.productImage ? '<img src="/uploads/' + c.productImage + '" style="width:45px; height:45px; object-fit:contain; background:#fff; border-radius:4px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(\'/uploads/' + c.productImage + '\')">' : ''}
+                                    ${c.productImage ? '<img src="/uploads/' + c.productImage + '" style="width:45px; height:45px; object-fit:cover; border-radius:4px; border:1px solid #ddd;" onclick="openImageModal(\'/uploads/' + c.productImage + '\')">' : ''}
                                     <div style="flex:1;">
                                         <p style="margin: 0 0 2px 0; font-weight: bold; color: #333; font-size: 12px;">প্রোডাক্ট: ${c.productName || 'General'}</p>
                                         <p style="margin: 0 0 2px 0; color: #555;">প্রশ্ন: ${c.message}</p>
@@ -275,9 +261,6 @@ const getNavbarHTML = (user) => `
                                     </div>
                                 </div>
                             `).join('');
-                            fetch('/api/mark-user-chats-read', {method: 'POST'});
-                            let badge = document.getElementById('userChatBadge');
-                            if(badge) badge.style.display = 'none';
                         }
                     } catch(e) {
                         document.getElementById('userChatContentContainer').innerHTML = '<p style="color:red; text-align:center;">ডেটা লোড করতে সমস্যা হয়েছে।</p>';
@@ -287,44 +270,6 @@ const getNavbarHTML = (user) => `
         </script>
     ` : ''}
 `;
-
-// ================= Daraz-style Splash Middleware / Interceptor =================
-app.use((req, res, next) => {
-    if (req.path === '/' && !req.cookies.visitedSplash) {
-        res.cookie('visitedSplash', 'true', { maxAge: 86400000 }); // 1 day
-        return res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Online Shop</title>
-                ${globalHeaderHTML}
-                <style>
-                    body { background: #f85606; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
-                    .splash-box { text-align: center; color: white; animation: fadeIn 1s ease-in-out; }
-                    .splash-logo { font-size: 45px; font-weight: bold; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 10px; }
-                    .splash-sub { font-size: 16px; opacity: 0.9; }
-                    .spinner { margin-top: 25px; width: 40px; height: 40px; border: 4px solid rgba(255,255,255,0.3); border-top: 4px solid white; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; }
-                    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-                    @keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
-                </style>
-            </head>
-            <body>
-                <div class="splash-box">
-                    <div class="splash-logo">🛒 Online Shop</div>
-                    <div class="splash-sub">Welcome to Online Shop BD</div>
-                    <div class="spinner"></div>
-                </div>
-                <script>
-                    setTimeout(() => {
-                        window.location.href = '/';
-                    }, 2000);
-                </script>
-            </body>
-            </html>
-        `);
-    }
-    next();
-});
 
 // ================= Public & Homepage Routes =================
 app.get('/', async (req, res, next) => {
@@ -345,7 +290,7 @@ app.get('/', async (req, res, next) => {
         let fbHTML = fbContents.map(fb => `
             <div style="background:white; padding:15px; margin-bottom:15px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
                 <p style="font-weight:bold; margin-bottom:8px;">${fb.title}</p>
-                ${fb.mediaType === 'image' ? `<img src="/uploads/${fb.mediaUrl}" style="max-width:100%; height:auto; object-fit:contain; border-radius:4px;">` : `<video src="/uploads/${fb.mediaUrl}" controls style="max-width:100%; border-radius:4px;"></video>`}
+                ${fb.mediaType === 'image' ? `<img src="/uploads/${fb.mediaUrl}" style="max-width:100%; height:auto; border-radius:4px;">` : `<video src="/uploads/${fb.mediaUrl}" controls style="max-width:100%; border-radius:4px;"></video>`}
                 <br><a href="${fb.productLink || '/'}" class="btn btn-buy" style="margin-top:10px; display:inline-block;">⚡ Order Now (Buy Direct)</a>
             </div>
         `).join('');
@@ -444,12 +389,12 @@ app.get('/product/:id', async (req, res, next) => {
         
         let allImages = [product.mainImage, ...(product.gallery || [])];
         let galleryHTML = allImages.map((img, idx) => `
-            <img src="/uploads/${img}" onclick="changeMainImage('${img}', this)" style="width:60px; height:60px; object-fit:contain; background:#fff; border-radius:4px; border:${idx === 0 ? '2px solid #f85606' : '1px solid #ccc'}; cursor:pointer;" class="thumb-img">
+            <img src="/uploads/${img}" onclick="changeMainImage('${img}', this)" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:${idx === 0 ? '2px solid #f85606' : '1px solid #ccc'}; cursor:pointer;" class="thumb-img">
         `).join('');
         
         let chatsHTML = chats.map(c => `
             <div style="border-bottom:1px solid #eee; padding:8px 0; display:flex; gap:10px; align-items:center;">
-                ${c.productImage ? `<img src="/uploads/${c.productImage}" style="width:40px; height:40px; object-fit:contain; background:#fff; border-radius:4px; border:1px solid #ccc; cursor:pointer;" onclick="openImageModal('/uploads/${c.productImage}')">` : ''}
+                ${c.productImage ? `<img src="/uploads/${c.productImage}" style="width:40px; height:40px; object-fit:cover; border-radius:4px; border:1px solid #ccc;" onclick="openImageModal('/uploads/${c.productImage}')">` : ''}
                 <div>
                     <p style="margin:0 0 4px 0;"><b>${c.userEmail}:</b> ${c.message}</p>
                     <p style="color:green; font-size:13px; margin:0;"><b>Admin Reply:</b> ${c.reply || 'Pending reply'}</p>
@@ -471,6 +416,7 @@ app.get('/product/:id', async (req, res, next) => {
                 <div class="price" style="font-size:15px;">৳${p.price}</div>
             </a>
         `).join('');
+
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -480,7 +426,7 @@ app.get('/product/:id', async (req, res, next) => {
                 <div class="container" style="background:white; padding:15px; border-radius:6px;">
                     <div style="display:flex; gap:20px; flex-wrap:wrap;">
                         <div style="width:100%; max-width:320px; margin:0 auto;">
-                            <img id="mainProductImg" src="/uploads/${product.mainImage}" style="width:100%; height:300px; object-fit:contain; background:#fff; border-radius:6px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(this.src)"><br>
+                            <img id="mainProductImg" src="/uploads/${product.mainImage}" style="width:100%; height:300px; object-fit:cover; border-radius:6px; border:1px solid #ddd;" onclick="openImageModal(this.src)"><br>
                             <div style="display:flex; gap:8px; margin-top:10px; overflow-x:auto;">${galleryHTML}</div>
                         </div>
                         <div style="flex:1; min-width: 260px;">
@@ -615,12 +561,6 @@ app.get('/api/user-chats-json', async (req, res, next) => {
     }
 });
 
-app.post('/api/mark-user-chats-read', async (req, res) => {
-    if(!req.user) return res.json({success: false});
-    await Chat.updateMany({ userEmail: req.user.email, reply: { $ne: '' }, userRead: false }, { userRead: true });
-    res.json({success: true});
-});
-
 // ================= Shopping Cart System =================
 app.get('/api/add-to-cart/:id', async (req, res, next) => {
     try {
@@ -704,10 +644,11 @@ app.get('/cart', async (req, res, next) => {
         let cart = req.cookies.cart ? JSON.parse(req.cookies.cart) : [];
         let subtotal = cart.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0);
         let maxDeliveryCharge = cart.length > 0 ? Math.max(...cart.map(i => i.customDeliveryCharge || 150)) : 150;
+
         let cartItemsHTML = cart.map(item => `
             <div style="display:flex; justify-content:space-between; align-items:center; background:#f9f9f9; padding:10px; margin-bottom:10px; border-radius:4px; flex-wrap:wrap; gap:10px;">
                 <div style="display:flex; align-items:center; gap:10px;">
-                    <img src="/uploads/${item.mainImage}" width="50" height="50" style="object-fit:contain; background:#fff; border-radius:4px; border:1px solid #f85606; cursor:pointer;" onclick="openImageModal('/uploads/${item.mainImage}')">
+                    <img src="/uploads/${item.mainImage}" width="50" height="50" style="object-fit:cover; border-radius:4px; border:1px solid #f85606;" onclick="openImageModal('/uploads/${item.mainImage}')">
                     <div>
                         <h4 style="margin:0 0 4px 0; font-size:14px;">${item.productName}</h4>
                         <p style="margin:0; color:#f85606; font-weight:bold;">৳${item.price} × ${item.quantity || 1} = ৳${item.price * (item.quantity || 1)}</p>
@@ -762,10 +703,11 @@ app.get('/cart-checkout', async (req, res, next) => {
         
         let itemsSummaryHTML = cart.map(i => `
             <div style="display:flex; align-items:center; gap:8px; margin:4px 0;">
-                <img src="/uploads/${i.mainImage}" width="35" height="35" style="object-fit:contain; background:#fff; border-radius:3px; cursor:pointer;" onclick="openImageModal('/uploads/${i.mainImage}')">
+                <img src="/uploads/${i.mainImage}" width="35" height="35" style="object-fit:cover; border-radius:3px;" onclick="openImageModal('/uploads/${i.mainImage}')">
                 <span style="font-size:13px;">• ${i.productName} (৳${i.price} × ${i.quantity || 1})</span>
             </div>
         `).join('');
+
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -972,7 +914,7 @@ app.get('/buy-now/:id', async (req, res, next) => {
                 <div class="container" style="max-width:600px; background:white; padding:20px; border-radius:6px;">
                     <h3 style="margin-top:0;">Checkout Order</h3>
                     <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
-                        <img src="/uploads/${selectedImage}" width="60" height="60" style="object-fit:contain; background:#fff; border-radius:4px; border:1px solid #f85606; cursor:pointer;" onclick="openImageModal('/uploads/${selectedImage}')">
+                        <img src="/uploads/${selectedImage}" width="60" height="60" style="object-fit:cover; border-radius:4px; border:1px solid #f85606;" onclick="openImageModal('/uploads/${selectedImage}')">
                         <div>
                             <p style="font-size:14px; margin:0; font-weight:bold;">${product.name}</p>
                             <p style="font-size:14px; margin:4px 0 0 0; color:#f85606;">Price: ৳<span id="unitPrice">${product.price}</span> × <span id="qtyVal">${qty}</span> = ৳<span id="productPrice">${totalPriceWithoutDelivery}</span></p>
@@ -1327,7 +1269,7 @@ app.get('/my-orders', async (req, res, next) => {
             }
             let itemsList = o.items.map(i => `
                 <div style="display:flex; align-items:center; gap:8px; margin:4px 0;">
-                    ${i.mainImage ? `<img src="/uploads/${i.mainImage}" width="40" height="40" style="object-fit:contain; background:#fff; border-radius:4px; border:1px solid #f85606; cursor:pointer;" onclick="openImageModal('/uploads/${i.mainImage}')">` : ''}
+                    ${i.mainImage ? `<img src="/uploads/${i.mainImage}" width="40" height="40" style="object-fit:cover; border-radius:4px; border:1px solid #f85606;" onclick="openImageModal('/uploads/${i.mainImage}')">` : ''}
                     <span>${i.productName} (৳${i.price} × ${i.quantity || 1})</span>
                 </div>
             `).join('');
@@ -1399,6 +1341,7 @@ app.get('/admin-dashboard', async (req, res, next) => {
         let completedCount = await Order.countDocuments({ status: 'Delivered' });
         let cancelledCount = await Order.countDocuments({ status: 'Cancelled' });
         let trashCount = await Order.countDocuments({ status: 'Trash' });
+
         let totalReviewsCount = await Review.countDocuments();
         let allReviews = await Review.find().sort({ _id: -1 });
         let lowStockProductsList = products.filter(p => p.stock <= 5);
@@ -1406,7 +1349,7 @@ app.get('/admin-dashboard', async (req, res, next) => {
         
         let chatsHTML = chats.map(c => `
             <div style="background:white; padding:12px; margin-bottom:10px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); display:flex; gap:12px; align-items:center;">
-                ${c.productImage ? `<img src="/uploads/${c.productImage}" style="width:60px; height:60px; object-fit:contain; background:#fff; border-radius:4px; border:1px solid #ccc; cursor:pointer;" onclick="openImageModal('/uploads/${c.productImage}')">` : '<div style="width:60px; height:60px; background:#eee; display:flex; align-items:center; justify-content:center; font-size:10px; color:#777; border-radius:4px;">No Image</div>'}
+                ${c.productImage ? `<img src="/uploads/${c.productImage}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ccc; cursor:pointer;" onclick="openImageModal('/uploads/${c.productImage}')">` : '<div style="width:60px; height:60px; background:#eee; display:flex; align-items:center; justify-content:center; font-size:10px; color:#777; border-radius:4px;">No Image</div>'}
                 <div style="flex:1;">
                     <p style="margin:0 0 4px 0; font-size:13px;"><b>User:</b> ${c.userEmail}</p>
                     <p style="margin:0 0 4px 0; font-size:13px;"><b>Product:</b> ${c.productName || 'N/A'}</p>
@@ -1423,7 +1366,7 @@ app.get('/admin-dashboard', async (req, res, next) => {
         let productsHTML = products.map(p => `
             <div style="background:white; padding:10px; margin-bottom:10px; border-radius:6px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
                 <div style="display:flex; align-items:center; gap:10px;">
-                    <img src="/uploads/${p.mainImage}" width="50" height="50" style="object-fit:contain; background:#fff; border-radius:4px; cursor:pointer;" onclick="openImageModal('/uploads/${p.mainImage}')">
+                    <img src="/uploads/${p.mainImage}" width="50" height="50" style="object-fit:cover; border-radius:4px;" onclick="openImageModal('/uploads/${p.mainImage}')">
                     <div>
                         <h4 style="margin:0; font-size:14px;">${p.name}</h4>
                         <p style="margin:2px 0; font-size:12px; color:#f85606;">Price: ৳${p.price} | Stock: ${p.stock} | চার্জ: ৳${p.customDeliveryCharge || 150}</p>
@@ -1460,13 +1403,9 @@ app.get('/admin-dashboard', async (req, res, next) => {
         if(activeTab === 'delivered') currentOrdersQuery.status = 'Delivered';
         let orders = await Order.find(currentOrdersQuery).sort({ _id: -1 });
 
+        // কাস্টমার অর্ডার বক্সে ডিটেইলস পেমেন্ট অপশন ক্লিক করলে বক্স বড় হওয়া এবং ইমেইল, এড্রেস আইডি দেখানোর ফিচার সহ অর্ডার লিস্ট
         let ordersHTML = orders.map(o => {
-            let itemsList = o.items.map(i => `
-                <div style="display:flex; align-items:center; gap:8px; margin:4px 0;">
-                    ${i.mainImage ? `<img src="/uploads/${i.mainImage}" width="40" height="40" style="object-fit:contain; background:#fff; border-radius:4px; border:1px solid #f85606; cursor:pointer;" onclick="openImageModal('/uploads/${i.mainImage}')">` : ''}
-                    <span>• ${i.productName} (৳${i.price} × ${i.quantity || 1})</span>
-                </div>
-            `).join('');
+            let itemsList = o.items.map(i => `• ${i.productName} (৳${i.price} × ${i.quantity || 1})`).join('<br>');
             return `
                 <div style="background:white; padding:12px; margin-bottom:10px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-size:13px;">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -1474,18 +1413,16 @@ app.get('/admin-dashboard', async (req, res, next) => {
                             <p style="margin:2px 0;"><b>Order ID:</b> ${o._id}</p>
                             <p style="margin:2px 0;"><b>Customer Email:</b> <span style="color:#007bff;">${o.userEmail}</span></p>
                             <p style="margin:2px 0;"><b>Name & Phone:</b> ${o.userName} (${o.userPhone})</p>
-                            <div style="margin:4px 0; background:#f4f4f4; padding:6px; border-radius:4px; border:1px dashed #ccc;">
-                                <p style="margin:0 0 2px 0; font-weight:bold; color:#f85606;">পূর্ণ ঠিকানা (খোপ খোপ আকারে):</p>
-                                ${o.userAddress}
-                            </div>
+                            <p style="margin:2px 0;"><b>Address ID / Location:</b> ${o.userAddress}</p>
                         </div>
                         <div>
                             <button type="button" onclick="toggleOrderDetails('${o._id}')" class="btn" style="padding:5px 10px; font-size:12px; background:#17a2b8;">🔍 ডিটেইলস ও পেমেন্ট</button>
                         </div>
                     </div>
                     
+                    <!-- এক্সপ্যান্ডেবল ডিটেইলস বক্স -->
                     <div id="details-${o._id}" style="display:none; margin-top:10px; padding:10px; background:#f8f9fa; border-radius:4px; border:1px solid #ddd;">
-                        <p style="margin:2px 0;"><b>Ordered Items & Images:</b><br>${itemsList}</p>
+                        <p style="margin:2px 0;"><b>Ordered Items:</b><br>${itemsList}</p>
                         <p style="margin:5px 0;"><b>Product Price:</b> ৳${o.productPrice} | <b>Delivery Charge:</b> ৳${o.deliveryCharge || 150} ${o.discountPrice ? `| <b>Discount:</b> -৳${o.discountPrice}` : ''}</p>
                         <p style="margin:2px 0; color:#f85606; font-weight:bold;">Total Amount: ৳${o.totalAmount}</p>
                         <p style="margin:5px 0;"><b>Payment Method:</b> ${o.paymentMethod} ${o.senderNumber ? `| <b>Sender Number:</b> ${o.senderNumber} | <b>Paid:</b> ৳${o.paidAmount} | <b>TrxID:</b> ${o.trxId || 'N/A'}` : ''}</p>
@@ -1511,12 +1448,14 @@ app.get('/admin-dashboard', async (req, res, next) => {
                 <div class="container">
                     <h2 style="margin-top:0;">⚙️ Admin Control Panel</h2>
                     
+                    <!-- স্ট্যাটিস্টিকস বাটনসমূহ (টোটাল সোল্ড আইটেম, রিভিউ, লো স্টক অ্যালার্ট) -->
                     <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px;">
                         <button onclick="openModal('soldModal')" class="btn" style="background:#17a2b8;">📦 টোটাল সোল্ড আইটেম (${confirmedOrdersList.length})</button>
                         <button onclick="openModal('reviewModal')" class="btn" style="background:#ffc107; color:#333;">⭐ টোটাল রিভিউ (${totalReviewsCount})</button>
                         <button onclick="openModal('stockModal')" class="btn" style="background:#dc3545;">⚠️ লো স্টক অ্যালার্ট (${lowStockProductsList.length})</button>
                     </div>
 
+                    <!-- মডাল উইন্ডোজ -->
                     <div id="soldModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); justify-content:center; align-items:center;">
                         <div style="background:white; padding:20px; border-radius:8px; width:90%; max-width:500px; max-height:80vh; overflow-y:auto;">
                             <h3>📦 কনফার্মড ও সোল্ড অর্ডারসমূহ</h3>
@@ -1525,6 +1464,7 @@ app.get('/admin-dashboard', async (req, res, next) => {
                             <br><button onclick="closeModal('soldModal')" class="btn" style="background:#6c757d;">বন্ধ করুন</button>
                         </div>
                     </div>
+
                     <div id="reviewModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); justify-content:center; align-items:center;">
                         <div style="background:white; padding:20px; border-radius:8px; width:90%; max-width:500px; max-height:80vh; overflow-y:auto;">
                             <h3>⭐ সকল পণ্যের রিভিউ</h3>
@@ -1533,6 +1473,7 @@ app.get('/admin-dashboard', async (req, res, next) => {
                             <br><button onclick="closeModal('reviewModal')" class="btn" style="background:#6c757d;">বন্ধ করুন</button>
                         </div>
                     </div>
+
                     <div id="stockModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); justify-content:center; align-items:center;">
                         <div style="background:white; padding:20px; border-radius:8px; width:90%; max-width:500px; max-height:80vh; overflow-y:auto;">
                             <h3>⚠️ লো স্টক অ্যালার্ট (স্টক ৫ বা তার কম)</h3>
@@ -1541,6 +1482,7 @@ app.get('/admin-dashboard', async (req, res, next) => {
                             <br><button onclick="closeModal('stockModal')" class="btn" style="background:#6c757d;">বন্ধ করুন</button>
                         </div>
                     </div>
+
                     <script>
                         function openModal(id) { document.getElementById(id).style.display = 'flex'; }
                         function closeModal(id) { document.getElementById(id).style.display = 'none'; }
@@ -1550,6 +1492,7 @@ app.get('/admin-dashboard', async (req, res, next) => {
                         }
                     </script>
 
+                    <!-- Add New Product Form with Custom Delivery Charge -->
                     <div style="background:white; padding:20px; border-radius:6px; margin-bottom:20px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
                         <h3>➕ Add New Product (ডেলিভারি চার্জ ও লিমিট সহ)</h3>
                         <form action="/admin/add-product" method="POST" enctype="multipart/form-data">
@@ -1585,6 +1528,7 @@ app.get('/admin-dashboard', async (req, res, next) => {
                         </form>
                     </div>
 
+                    <!-- Tab Navigation for Orders -->
                     <div style="display:flex; gap:5px; margin-bottom:15px; overflow-x:auto;">
                         <a href="/admin-dashboard?tab=pending" class="btn" style="background:${activeTab==='pending'?'#f85606':'#ccc'}">Pending (${pendingCount})</a>
                         <a href="/admin-dashboard?tab=confirmed" class="btn" style="background:${activeTab==='confirmed'?'#f85606':'#ccc'}">Confirmed (${confirmedCount})</a>
@@ -1592,29 +1536,29 @@ app.get('/admin-dashboard', async (req, res, next) => {
                         <a href="/admin-dashboard?tab=cancelled" class="btn" style="background:${activeTab==='cancelled'?'#f85606':'#ccc'}">Cancelled (${cancelledCount})</a>
                         <a href="/admin-dashboard?tab=trash" class="btn" style="background:${activeTab==='trash'?'#f85606':'#ccc'}">Trash (${trashCount})</a>
                     </div>
-                    
+
                     <h3 style="margin-top:20px;">📦 Orders List (${activeTab.toUpperCase()})</h3>
                     <div>${ordersHTML.length ? ordersHTML : '<p style="background:white; padding:20px; text-align:center;">No orders found in this tab.</p>'}</div>
-                    
+
                     <hr style="margin:30px 0;">
                     <h3>💬 Customer Chat Inquiries</h3>
                     <div>${chatsHTML.length ? chatsHTML : '<p style="background:white; padding:20px; text-align:center;">No chats available.</p>'}</div>
-                    
+
                     <hr style="margin:30px 0;">
                     <h3>👥 User Account Management</h3>
                     <div>${usersHTML.length ? usersHTML : '<p style="background:white; padding:20px; text-align:center;">No users found.</p>'}</div>
-                    
+
                     <hr style="margin:30px 0;">
                     <h3>🎟️ Coupon Management</h3>
                     <form action="/admin/add-coupon" method="POST" style="background:white; padding:15px; border-radius:6px; display:flex; gap:10px; margin-bottom:15px;">
                         <input type="text" name="code" placeholder="Coupon Code" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px;" required>
                         <input type="number" name="discountAmount" placeholder="Discount (TK)" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px;" required>
-                        <button type="submit" class="btn" style="padding:8px 15px;">Add Coupon</button>
+                        <button type="submit" class="btn" style="padding:8px 15px;">Create Coupon</button>
                     </form>
-                    <div>${couponsHTML.length ? couponsHTML : '<p style="background:white; padding:20px; text-align:center;">No coupons found.</p>'}</div>
-                    
+                    <div>${couponsHTML}</div>
+
                     <hr style="margin:30px 0;">
-                    <h3>🛍️ Manage All Products</h3>
+                    <h3>📦 Product Inventory Management</h3>
                     <div>${productsHTML}</div>
                 </div>
             </body>
@@ -1625,12 +1569,13 @@ app.get('/admin-dashboard', async (req, res, next) => {
     }
 });
 
-app.post('/admin/add-product', upload.fields([{ name: 'mainImage', maxCount: 1 }, { name: 'gallery', maxCount: 10 }]), async (req, res, next) => {
+// Admin Actions
+app.post('/admin/add-product', upload.fields([{ name: 'mainImage', maxCount: 1 }, { name: 'gallery', maxCount: 5 }]), async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         const { name, category, price, stock, maxOrderLimit, customDeliveryCharge, description } = req.body;
-        let mainImage = req.files && req.files['mainImage'] ? req.files['mainImage'][0].filename : '';
-        let gallery = req.files && req.files['gallery'] ? req.files['gallery'].map(file => file.filename) : [];
+        let mainImg = req.files['mainImage'] ? req.files['mainImage'][0].filename : '';
+        let galleryImgs = req.files['gallery'] ? req.files['gallery'].map(f => f.filename) : [];
         
         await new Product({
             name,
@@ -1640,9 +1585,64 @@ app.post('/admin/add-product', upload.fields([{ name: 'mainImage', maxCount: 1 }
             maxOrderLimit: Number(maxOrderLimit) || 5,
             customDeliveryCharge: Number(customDeliveryCharge) || 150,
             description,
-            mainImage,
-            gallery
+            mainImage: mainImg,
+            gallery: galleryImgs
         }).save();
+        res.redirect('/admin-dashboard');
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.get('/admin/edit-product/:id', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        let product = await Product.findById(req.params.id);
+        if (!product) return res.send('Product not found');
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head><title>Edit Product</title>${globalHeaderHTML}</head>
+            <body>
+                ${getNavbarHTML(req.user)}
+                <div class="container" style="max-width:500px; background:white; padding:20px; border-radius:6px;">
+                    <h3>Edit Product</h3>
+                    <form action="/admin/update-product/${product._id}" method="POST">
+                        <label>Product Name:</label><br>
+                        <input type="text" name="name" value="${product.name}" style="width:100%; padding:8px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                        <label>Price (TK):</label><br>
+                        <input type="number" name="price" value="${product.price}" style="width:100%; padding:8px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                        <label>Stock:</label><br>
+                        <input type="number" name="stock" value="${product.stock}" style="width:100%; padding:8px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                        <label>Max Order Limit:</label><br>
+                        <input type="number" name="maxOrderLimit" value="${product.maxOrderLimit || 5}" style="width:100%; padding:8px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><br>
+                        <label>Delivery Charge (TK):</label><br>
+                        <input type="number" name="customDeliveryCharge" value="${product.customDeliveryCharge || 150}" style="width:100%; padding:8px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><br>
+                        <label>Description:</label><br>
+                        <textarea name="description" style="width:100%; height:60px; padding:8px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px;">${product.description}</textarea><br>
+                        <button type="submit" class="btn" style="padding:10px 20px;">Update Product</button>
+                    </form>
+                </div>
+            </body>
+            </html>
+        `);
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.post('/admin/update-product/:id', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        const { name, price, stock, maxOrderLimit, customDeliveryCharge, description } = req.body;
+        await Product.findByIdAndUpdate(req.params.id, {
+            name,
+            price: Number(price),
+            stock: Number(stock),
+            maxOrderLimit: Number(maxOrderLimit) || 5,
+            customDeliveryCharge: Number(customDeliveryCharge) || 150,
+            description
+        });
         res.redirect('/admin-dashboard');
     } catch (err) {
         next(err);
@@ -1659,13 +1659,60 @@ app.get('/admin/delete-product/:id', async (req, res, next) => {
     }
 });
 
+app.post('/admin/reply-chat', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        let { chatId, reply } = req.body;
+        await Chat.findByIdAndUpdate(chatId, { reply });
+        res.redirect('/admin-dashboard');
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.get('/admin/toggle-block-user/:id', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        let targetUser = await User.findById(req.params.id);
+        if (targetUser) {
+            targetUser.isBlocked = !targetUser.isBlocked;
+            await targetUser.save();
+        }
+        res.redirect('/admin-dashboard');
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.post('/admin/add-coupon', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        let { code, discountAmount } = req.body;
+        await new Coupon({ code: code.trim(), discountAmount: Number(discountAmount) }).save();
+        res.redirect('/admin-dashboard');
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.get('/admin/delete-coupon/:id', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        await Coupon.findByIdAndDelete(req.params.id);
+        res.redirect('/admin-dashboard');
+    } catch (err) {
+        next(err);
+    }
+});
+
 app.get('/admin/update-order-status/:id/:status', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         let order = await Order.findById(req.params.id);
+        let newStatus = req.params.status;
         if (order) {
-            order.status = req.params.status;
-            order.previousStatus = req.params.status;
+            order.previousStatus = order.status;
+            order.status = newStatus;
             await order.save();
         }
         res.redirect('/admin-dashboard');
@@ -1684,58 +1731,7 @@ app.get('/admin/delete-order/:id', async (req, res, next) => {
     }
 });
 
-app.post('/admin/reply-chat', async (req, res, next) => {
-    try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        let { chatId, reply } = req.body;
-        await Chat.findByIdAndUpdate(chatId, { reply, userRead: false });
-        res.redirect('/admin-dashboard');
-    } catch (err) {
-        next(err);
-    }
-});
-
-app.get('/admin/toggle-block-user/:id', async (req, res, next) => {
-    try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        let user = await User.findById(req.params.id);
-        if (user) {
-            user.isBlocked = !user.isBlocked;
-            await user.save();
-        }
-        res.redirect('/admin-dashboard');
-    } catch (err) {
-        next(err);
-    }
-});
-
-app.post('/admin/add-coupon', async (req, res, next) => {
-    try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        const { code, discountAmount } = req.body;
-        await new Coupon({ code: code.trim(), discountAmount: Number(discountAmount) }).save();
-        res.redirect('/admin-dashboard');
-    } catch (err) {
-        next(err);
-    }
-});
-
-app.get('/admin/delete-coupon/:id', async (req, res, next) => {
-    try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        await Coupon.findByIdAndDelete(req.params.id);
-        res.redirect('/admin-dashboard');
-    } catch (err) {
-        next(err);
-    }
-});
-
-// ================= Global Error Handling & Server Startup =================
-app.use((err, req, res, next) => {
-    console.error("Global Error: ", err);
-    res.status(500).send(`<h3 style="color:red; text-align:center; margin-top:50px;">Something went wrong! Internal Server Error.</h3>`);
-});
-
+// ================= Server Startup =================
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
