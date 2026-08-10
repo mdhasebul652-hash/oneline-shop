@@ -253,19 +253,21 @@ const getNavbarHTML = (user) => `
                         let chats = await res.json();
                         let container = document.getElementById('userChatContentContainer');
                         if(chats.length === 0) {
-                            container.innerHTML = '<p style="text-align:center; color:#777; padding:20px;">কোনো মেসেজ বা প্রশ্ন করা হয়নি। প্রোডাক্ট পেজ থেকে প্রশ্ন করতে পারেন।</p>';
-                        } else {
-                            container.innerHTML = chats.map(c => `
-                                <div style="background: #f9f9f9; padding: 8px; margin-bottom: 8px; border-radius: 6px; border-left: 3px solid #f85606; display: flex; gap: 8px; align-items: center;">
-                                    ${c.productImage ? '<img src="/uploads/' + c.productImage + '" style="width:45px; height:45px; object-fit:cover; border-radius:4px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(\'/uploads/' + c.productImage + '\')">' : ''}
-                                    <div style="flex:1;">
-                                        <p style="margin: 0 0 2px 0; font-weight: bold; color: #333; font-size: 12px;">প্রোডাক্ট: ${c.productName || 'General'}</p>
-                                        <p style="margin: 0 0 2px 0; color: #555;">প্রশ্ন: ${c.message}</p>
-                                        <p style="margin: 0; color: ${c.reply ? 'green' : '#e67e22'}; font-weight: bold; font-size: 12px;">এডমিন রিপ্লাই: ${c.reply || 'অপেক্ষা করুন (Pending)'}</p>
-                                    </div>
-                                </div>
-                            `).join('');
-                        }
+    if(chats.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #777; padding: 20px;">কোনো প্রশ্ন বা চ্যাট নেই</p>';
+    } else {
+        container.innerHTML = chats.map(c => 
+            '<div style="background: #f9f9f9; padding: 8px; margin-bottom: 8px; border-radius: 4px;">' +
+                (c.productImage ? '<img src="/uploads/' + c.productImage + '" style="width: 40px; height: 40px; object-fit: cover; margin-right: 8px; border-radius: 4px;">' : '') +
+                '<div style="flex:1;">' +
+                    '<p style="margin: 0 0 2px 0; font-weight: bold; color: #333; font-size: 13px;">পণ্য: ' + (c.productName || 'N/A') + '</p>' +
+                    '<p style="margin: 0 0 2px 0; color: #555; font-size: 12px;">প্রশ্ন: ' + c.message + '</p>' +
+                    '<p style="margin: 0; color: ' + (c.reply ? 'green' : '#e67e22') + '; font-size: 12px;">উত্তর: ' + (c.reply || 'উত্তর এখনো দেওয়া হয়নি') + '</p>' +
+                '</div>' +
+            '</div>'
+        ).join('');
+    }
+
                     } catch(e) {
                         document.getElementById('userChatContentContainer').innerHTML = '<p style="color:red; text-align:center;">ডেটা লোড করতে সমস্যা হয়েছে।</p>';
                     }
