@@ -254,7 +254,7 @@ const getNavbarHTML = (user) => `
                         } else {
                             container.innerHTML = chats.map(c => `
                                 <div style="background: #f9f9f9; padding: 8px; margin-bottom: 8px; border-radius: 6px; border-left: 3px solid #f85606; display: flex; gap: 8px; align-items: center;">
-                                    ${c.productImage ? '<img src="/uploads/' + c.productImage + '" style="width:45px; height:45px; object-fit:cover; border-radius:4px; border:1px solid #ddd;" onclick="openImageModal(\'/uploads/' + c.productImage + '\)">' : ''}
+                                    ${c.productImage ? '<img src="/uploads/' + c.productImage + '" style="width:45px; height:45px; object-fit:cover; border-radius:4px; border:1px solid #ddd;" onclick="openImageModal(\'/uploads/' + c.productImage + '\')">' : ''}
                                     <div style="flex:1;">
                                         <p style="margin: 0 0 2px 0; font-weight: bold; color: #333; font-size: 12px;">প্রোডাক্ট: ${c.productName || 'General'}</p>
                                         <p style="margin: 0 0 2px 0; color: #555;">প্রশ্ন: ${c.message}</p>
@@ -1469,146 +1469,86 @@ app.get('/admin-dashboard', async (req, res, next) => {
         let cancelledCount = await Order.countDocuments({ status: 'Cancelled' });
         let trashCount = await Order.countDocuments({ status: 'Trash' });
         
-        let totalReviewsCount = await Review.countDocuments();
-        let allReviews = await Review.find().sort({ _id: -1 });
-        let allProductsList = products;
-        let lowStockProductsList = products.filter(p => p.stock <= 5);
-        let confirmedOrdersList = await Order.find({ status: 'Confirmed' }).sort({ _id: -1 });
+        let targetOrderStatus = 'Pending';
+        if(activeTab === 'confirmed') targetOrderStatus = 'Confirmed';
+        if(activeTab === 'completed') targetOrderStatus = 'Delivered';
+        if(activeTab === 'cancelled') targetOrderStatus = 'Cancelled';
+        if(activeTab === 'trash') targetOrderStatus = 'Trash';
         
-        let chatsHTML = chats.map(c => `
-            <div style="background:white; padding:12px; margin-bottom:10px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); display:flex; gap:12px; align-items:center;">
-                ${c.productImage ? `<img src="/uploads/${c.productImage}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ccc; cursor:pointer;" onclick="openImageModal('/uploads/${c.productImage}')">` : '<div style="width:60px; height:60px; background:#eee; display:flex; align-items:center; justify-content:center; font-size:10px; color:#777; border-radius:4px;">No Image</div>'}
-                <div style="flex:1;">
-                    <p style="margin:0 0 4px 0; font-size:13px;"><b>User:</b> ${c.userEmail}</p>
-                    <p style="margin:0 0 4px 0; font-size:13px;"><b>Product:</b> ${c.productName || 'N/A'}</p>
-                    <p style="margin:0 0 6px 0; font-size:14px; color:#333;"><b>Message:</b> ${c.message}</p>
-                    <form action="/admin/reply-chat" method="POST" style="display:flex; gap:6px;">
-                        <input type="hidden" name="chatId" value="${c._id}">
-                        <input type="text" name="reply" value="${c.reply || ''}" placeholder="Type reply here..." style="flex:1; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
-                        <button type="submit" class="btn" style="padding:6px 12px; font-size:12px;">Reply</button>
-                    </form>
+        let ordersList = await Order.find({ status: targetOrderStatus }).sort({ _id: -1 });
+        
+        let ordersHTML = ordersList.map(o => {
+            let itemsSummary = o.items.map(i => `${i.productName} (৳${i.price} × ${i.quantity || 1})`).join(', ');
+            let actionButtons = '';
+            if (o.status === 'Pending') {
+                actionButtons = `
+                    <a href="/admin/order-action/${o._id}/Confirmed" class="btn" style="background:#007bff; padding:5px 10px; font-size:12px; margin-right:5px;">Confirm</a>
+                    <a href="/admin/order-action/${o._id}/Cancelled" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px; margin-right:5px;">Cancel</a>
+                    <a href="/admin/order-action/${o._id}/Trash" class="btn" style="background:#6c757d; padding:5px 10px; font-size:12px;">Delete (Trash)</a>
+                `;
+            } else if (o.status === 'Confirmed') {
+                actionButtons = `
+                    <a href="/admin/order-action/${o._id}/Delivered" class="btn" style="background:#28a745; padding:5px 10px; font-size:12px; margin-right:5px;">Mark Delivered</a>
+                    <a href="/admin/order-action/${o._id}/Cancelled" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px; margin-right:5px;">Cancel</a>
+                    <a href="/admin/order-action/${o._id}/Trash" class="btn" style="background:#6c757d; padding:5px 10px; font-size:12px;">Delete (Trash)</a>
+                `;
+            } else {
+                actionButtons = `
+                    <a href="/admin/order-action/${o._id}/Trash" class="btn" style="background:#6c757d; padding:5px 10px; font-size:12px;">Delete (Trash)</a>
+                `;
+            }
+            
+            return `
+                <div style="background:#fff; padding:15px; margin-bottom:12px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-size:13px;">
+                    <p style="margin:4px 0;"><b>Order ID:</b> ${o._id} | <b>Date:</b> ${new Date(o.createdAt).toLocaleString()}</p>
+                    <p style="margin:4px 0; color:#f85606;"><b>Customer Info:</b> ${o.userName || 'N/A'} | Phone: ${o.userPhone || 'N/A'} | Email: ${o.userEmail}</p>
+                    <p style="margin:4px 0;"><b>Address:</b> ${o.userAddress || 'N/A'}</p>
+                    <p style="margin:4px 0;"><b>Items:</b> ${itemsSummary}</p>
+                    <p style="margin:4px 0;"><b>Total Amount:</b> ৳${o.totalAmount} (${o.paymentMethod}) ${o.senderNumber ? '| Sender: ' + o.senderNumber + ' | Paid: ৳' + o.paidAmount : ''}</p>
+                    ${o.customerNote ? `<p style="margin:4px 0; color:#555;"><b>Note:</b> ${o.customerNote}</p>` : ''}
+                    <div style="margin-top:8px;">${actionButtons}</div>
                 </div>
+            `;
+        }).join('');
+        
+        let usersHTML = users.map(u => `
+            <div style="background:white; padding:10px; margin-bottom:8px; border-radius:4px; display:flex; justify-content:space-between; align-items:center; font-size:13px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+                <div>
+                    <b>${u.email}</b> (${u.name || 'No Name'}, Phone: ${u.phone || 'N/A'})<br>
+                    <span style="color:${u.isBlocked ? 'red' : 'green'}; font-weight:bold;">${u.isBlocked ? 'Blocked (COD Restricted)' : 'Active (Normal)'}</span>
+                </div>
+                <div>
+                    ${u.isBlocked ? `<a href="/admin/unblock-user/${u._id}" class="btn" style="background:green; padding:5px 10px; font-size:12px;">Unblock</a>` : `<a href="/admin/block-user/${u._id}" class="btn" style="background:red; padding:5px 10px; font-size:12px;">Block COD</a>`}
+                </div>
+            </div>
+        `).join('');
+
+        let chatsHTML = chats.map(c => `
+            <div style="background:white; padding:12px; margin-bottom:10px; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,0.05); font-size:13px;">
+                <p style="margin:0 0 4px 0;"><b>User:</b> ${c.userEmail} | <b>Product:</b> ${c.productName || 'General'}</p>
+                <p style="margin:0 0 6px 0; color:#333;"><b>Question:</b> ${c.message}</p>
+                <form action="/admin/reply-chat" method="POST" style="display:flex; gap:6px;">
+                    <input type="hidden" name="chatId" value="${c._id}">
+                    <input type="text" name="reply" value="${c.reply || ''}" placeholder="Write admin reply..." style="flex:1; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required>
+                    <button type="submit" class="btn" style="padding:6px 12px; font-size:12px;">Reply</button>
+                </form>
             </div>
         `).join('');
 
         let productsHTML = products.map(p => `
-            <div style="background:white; padding:10px; margin-bottom:10px; border-radius:6px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+            <div style="background:white; padding:10px; margin-bottom:8px; border-radius:4px; display:flex; justify-content:space-between; align-items:center; font-size:13px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
                 <div style="display:flex; align-items:center; gap:10px;">
-                    <img src="/uploads/${p.mainImage}" width="45" height="45" style="object-fit:cover; border-radius:4px; border:1px solid #ccc; cursor:pointer;" onclick="openImageModal('/uploads/${p.mainImage}')">
-                    <div>
-                        <h4 style="margin:0 0 2px 0; font-size:14px;">${p.name}</h4>
-                        <p style="margin:0; font-size:12px; color:#666;">Price: ৳${p.price} | Stock: ${p.stock} | Limit: ${p.maxOrderLimit || 5}</p>
-                    </div>
+                    <img src="/uploads/${p.mainImage}" width="40" height="40" style="object-fit:cover; border-radius:4px;">
+                    <div><b>${p.name}</b><br>৳${p.price} | Stock: ${p.stock} | Limit: ${p.maxOrderLimit || 5}</div>
                 </div>
-                <div style="display:flex; gap:6px;">
-                    <a href="/admin/delete-product/${p._id}" class="btn" style="padding:5px 10px; font-size:12px; background:#dc3545;" onclick="return confirm('Delete this product?');">Delete</a>
-                </div>
+                <a href="/admin/delete-product/${p._id}" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px;" onclick="return confirm('Delete this product?');">Delete</a>
             </div>
         `).join('');
 
-        let usersHTML = users.map(u => `
-            <div style="background:white; padding:10px; margin-bottom:10px; border-radius:6px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-                <div>
-                    <p style="margin:0 0 2px 0; font-size:13px;"><b>Email:</b> ${u.email}</p>
-                    <p style="margin:0; font-size:12px; color:${u.isBlocked ? 'red' : 'green'};"><b>COD Status:</b> ${u.isBlocked ? 'Restricted (Blocked)' : 'Active (Good)'}</p>
-                </div>
-                <div>
-                    ${u.isBlocked ? 
-                        `<a href="/admin/unblock-user/${u._id}" class="btn" style="padding:5px 10px; font-size:12px; background:#28a745;">Unblock COD</a>` :
-                        `<a href="/admin/block-user/${u._id}" class="btn" style="padding:5px 10px; font-size:12px; background:#dc3545;" onclick="return confirm('Block COD for this user?');">Block COD</a>`
-                    }
-                </div>
-            </div>
-        `).join('');
-
-        let couponsHTML = coupons.map(c => `
-            <div style="background:white; padding:10px; margin-bottom:10px; border-radius:6px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-                <div>
-                    <p style="margin:0 0 2px 0; font-size:14px;"><b>Code:</b> ${c.code}</p>
-                    <p style="margin:0; font-size:12px; color:#f85606;"><b>Discount Amount:</b> ৳${c.discountAmount}</p>
-                </div>
-                <a href="/admin/delete-coupon/${c._id}" class="btn" style="padding:5px 10px; font-size:12px; background:#dc3545;" onclick="return confirm('Delete coupon?');">Delete</a>
-            </div>
-        `).join('');
-
-        let queryStatus = 'Pending';
-        if(activeTab === 'confirmed') queryStatus = 'Confirmed';
-        if(activeTab === 'delivered') queryStatus = 'Delivered';
-        if(activeTab === 'cancelled') queryStatus = 'Cancelled';
-        if(activeTab === 'trash') queryStatus = 'Trash';
-
-        let orders = await Order.find({ status: queryStatus }).sort({ _id: -1 });
-        let ordersHTML = orders.map(o => {
-            let itemsList = o.items.map(i => `
-                <div style="display:flex; align-items:center; gap:8px; margin:4px 0;">
-                    ${i.mainImage ? `<img src="/uploads/${i.mainImage}" width="40" height="40" style="object-fit:cover; border-radius:4px; border:1px solid #f85606;" onclick="openImageModal('/uploads/${i.mainImage}')">` : ''}
-                    <span style="font-size:13px;">${i.productName} (৳${i.price} × ${i.quantity || 1})</span>
-                </div>
-            `).join('');
-
-            let actionButtons = '';
-            if (activeTab === 'pending') {
-                actionButtons = `
-                    <a href="/admin/order-action/${o._id}/Confirmed" class="btn" style="padding:6px 12px; font-size:12px; background:#007bff;">Confirm Order</a>
-                    <a href="/admin/order-action/${o._id}/Cancelled" class="btn" style="padding:6px 12px; font-size:12px; background:#dc3545;">Cancel Order</a>
-                `;
-            } else if (activeTab === 'confirmed') {
-                actionButtons = `
-                    <a href="/admin/order-action/${o._id}/Delivered" class="btn" style="padding:6px 12px; font-size:12px; background:#28a745;">Mark as Delivered</a>
-                    <a href="/admin/order-action/${o._id}/Cancelled" class="btn" style="padding:6px 12px; font-size:12px; background:#dc3545;">Cancel</a>
-                `;
-            } else if (activeTab === 'delivered') {
-                actionButtons = `<span style="color:green; font-weight:bold; font-size:13px;">Completed</span>`;
-            } else if (activeTab === 'cancelled' || activeTab === 'trash') {
-                actionButtons = `<a href="/admin/order-action/${o._id}/Trash" class="btn" style="padding:6px 12px; font-size:12px; background:#6c757d;">Move to Trash / Delete</a>`;
-            }
-
-            return `
-                <div style="background:white; padding:15px; margin-bottom:12px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-size:13px;">
-                    <p style="margin:4px 0;"><b>Order ID:</b> ${o._id} | <b>Date:</b> ${new Date(o.createdAt).toLocaleString()}</p>
-                    <p style="margin:4px 0;"><b>Customer Name:</b> ${o.userName || 'N/A'} | <b>Phone:</b> ${o.userPhone || 'N/A'}</p>
-                    <p style="margin:4px 0;"><b>Address:</b> ${o.userAddress || 'N/A'}</p>
-                    <p style="margin:4px 0;"><b>Payment:</b> ${o.paymentMethod} ${o.senderNumber ? '| Sender: ' + o.senderNumber + ' | Paid: ৳' + o.paidAmount : ''} ${o.trxId ? '| TrxID: ' + o.trxId : ''}</p>
-                    ${o.customerNote ? `<p style="margin:4px 0; color:#555;"><b>Customer Note:</b> ${o.customerNote}</p>` : ''}
-                    <div style="background:#f9f9f9; padding:8px; border-radius:4px; margin:8px 0;">
-                        <p style="margin:0 0 4px 0; font-weight:bold;">Ordered Items & Pictures:</p>
-                        ${itemsList}
-                    </div>
-                    <p style="margin:4px 0; font-weight:bold; color:#f85606;">Total Amount: ৳${o.totalAmount} (Product: ৳${o.productPrice || 0} + Delivery: ৳${o.deliveryCharge || 0} ${o.discountPrice ? '- Disc: ৳' + o.discountPrice : ''})</p>
-                    <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-                        ${actionButtons}
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        let allReviewsHTML = allReviews.map(r => `
-            <div style="background:#f9f9f9; padding:10px; margin-bottom:8px; border-radius:4px; border-left:3px solid #ff9800;">
-                <p style="margin:0 0 2px 0; font-size:13px;"><b>${r.userEmail}</b> - <span style="color:#ff9800;">${'★'.repeat(r.rating)}</span></p>
-                <p style="margin:0; font-size:13px; color:#444;">${r.comment}</p>
-            </div>
-        `).join('');
-
-        let allProductsHTML = allProductsList.map(p => `
-            <div style="display:flex; align-items:center; gap:10px; background:#f9f9f9; padding:8px; margin-bottom:8px; border-radius:4px;">
-                <img src="/uploads/${p.mainImage}" width="40" height="40" style="object-fit:cover; border-radius:4px; cursor:pointer;" onclick="openImageModal('/uploads/${p.mainImage}')">
-                <div style="font-size:13px;"><b>${p.name}</b><br>Price: ৳${p.price} | Stock: ${p.stock}</div>
-            </div>
-        `).join('');
-
-        let lowStockHTML = lowStockProductsList.map(p => `
-            <div style="display:flex; align-items:center; gap:10px; background:#fff3cd; padding:8px; margin-bottom:8px; border-radius:4px; border-left:3px solid #856404;">
-                <img src="/uploads/${p.mainImage}" width="40" height="40" style="object-fit:cover; border-radius:4px; cursor:pointer;" onclick="openImageModal('/uploads/${p.mainImage}')">
-                <div style="font-size:13px; color:#856404;"><b>${p.name}</b><br>Stock: <b>${p.stock}</b> (Low Stock!)</div>
-            </div>
-        `).join('');
-
-        let confirmedOrdersHTML = confirmedOrdersList.map(o => `
-            <div style="background:#e8f4fd; padding:10px; margin-bottom:8px; border-radius:4px; border-left:3px solid #007bff; font-size:13px;">
-                <p style="margin:0 0 4px 0;"><b>Order ID:</b> ${o._id} | <b>Customer:</b> ${o.userName}</p>
-                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
-                    ${o.items.map(i => i.mainImage ? `<img src="/uploads/${i.mainImage}" width="35" height="35" style="object-fit:cover; border-radius:3px; cursor:pointer;" onclick="openImageModal('/uploads/${i.mainImage}')" title="${i.productName}">` : '').join('')}
-                </div>
+        let couponsHTML = coupons.map(co => `
+            <div style="background:white; padding:10px; margin-bottom:8px; border-radius:4px; display:flex; justify-content:space-between; align-items:center; font-size:13px;">
+                <div><b>Code:</b> ${co.code} | <b>Discount:</b> ৳${co.discountAmount}</div>
+                <a href="/admin/delete-coupon/${co._id}" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px;">Delete</a>
             </div>
         `).join('');
 
@@ -1618,96 +1558,118 @@ app.get('/admin-dashboard', async (req, res, next) => {
             <head><title>Admin Dashboard</title>${globalHeaderHTML}</head>
             <body>
                 ${getNavbarHTML(req.user)}
-                <div class="container">
-                    <h2 style="margin-top:0;">⚙️ Admin Control Panel</h2>
+                <div class="container" style="max-width:1000px;">
+                    <h3 style="margin-bottom:15px;">⚙️ Admin Dashboard</h3>
                     
-                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; margin-bottom:20px;">
-                        <div onclick="openAdminModal('reviewsModal')" style="background:white; padding:15px; border-radius:6px; text-align:center; box-shadow:0 1px 3px rgba(0,0,0,0.1); cursor:pointer; border-top:4px solid #ff9800;">
-                            <h4 style="margin:0 0 5px 0; color:#666; font-size:13px;">Total Reviews</h4>
-                            <h2 style="margin:0; color:#ff9800;">${totalReviewsCount}</h2>
-                            <small style="color:#007bff; font-size:11px;">🔍 Click to view</small>
-                        </div>
-                        <div onclick="openAdminModal('productsModal')" style="background:white; padding:15px; border-radius:6px; text-align:center; box-shadow:0 1px 3px rgba(0,0,0,0.1); cursor:pointer; border-top:4px solid #28a745;">
-                            <h4 style="margin:0 0 5px 0; color:#666; font-size:13px;">Total Products</h4>
-                            <h2 style="margin:0; color:#28a745;">${products.length}</h2>
-                            <small style="color:#007bff; font-size:11px;">🔍 Click to view</small>
-                        </div>
-                        <div onclick="openAdminModal('lowStockModal')" style="background:white; padding:15px; border-radius:6px; text-align:center; box-shadow:0 1px 3px rgba(0,0,0,0.1); cursor:pointer; border-top:4px solid #dc3545;">
-                            <h4 style="margin:0 0 5px 0; color:#666; font-size:13px;">Low Stock Products</h4>
-                            <h2 style="margin:0; color:#dc3545;">${lowStockProductsList.length}</h2>
-                            <small style="color:#007bff; font-size:11px;">🔍 Click to view</small>
-                        </div>
-                        <div onclick="openAdminModal('confirmedOrdersModal')" style="background:white; padding:15px; border-radius:6px; text-align:center; box-shadow:0 1px 3px rgba(0,0,0,0.1); cursor:pointer; border-top:4px solid #007bff;">
-                            <h4 style="margin:0 0 5px 0; color:#666; font-size:13px;">Confirmed Orders</h4>
-                            <h2 style="margin:0; color:#007bff;">${confirmedCount}</h2>
-                            <small style="color:#007bff; font-size:11px;">🔍 Click to view</small>
-                        </div>
+                    <div style="display:flex; gap:8px; margin-bottom:15px; flex-wrap:wrap;">
+                        <a href="/admin-dashboard?tab=pending" class="btn" style="background:${activeTab === 'pending' ? '#f85606' : '#555'}; padding:8px 14px;">Pending (${pendingCount})</a>
+                        <a href="/admin-dashboard?tab=confirmed" class="btn" style="background:${activeTab === 'confirmed' ? '#f85606' : '#555'}; padding:8px 14px;">Confirmed (${confirmedCount})</a>
+                        <a href="/admin-dashboard?tab=completed" class="btn" style="background:${activeTab === 'completed' ? '#f85606' : '#555'}; padding:8px 14px;">Completed (${completedCount})</a>
+                        <a href="/admin-dashboard?tab=cancelled" class="btn" style="background:${activeTab === 'cancelled' ? '#f85606' : '#555'}; padding:8px 14px;">Cancelled (${cancelledCount})</a>
+                        <a href="/admin-dashboard?tab=trash" class="btn" style="background:${activeTab === 'trash' ? '#f85606' : '#555'}; padding:8px 14px;">Trash (${trashCount})</a>
+                        <a href="/admin-dashboard?tab=products" class="btn" style="background:${activeTab === 'products' ? '#f85606' : '#555'}; padding:8px 14px;">Products</a>
+                        <a href="/admin-dashboard?tab=addproduct" class="btn" style="background:${activeTab === 'addproduct' ? '#f85606' : '#555'}; padding:8px 14px;">Add Product</a>
+                        <a href="/admin-dashboard?tab=users" class="btn" style="background:${activeTab === 'users' ? '#f85606' : '#555'}; padding:8px 14px;">Users & Block</a>
+                        <a href="/admin-dashboard?tab=chats" class="btn" style="background:${activeTab === 'chats' ? '#f85606' : '#555'}; padding:8px 14px;">Customer Chats</a>
+                        <a href="/admin-dashboard?tab=coupons" class="btn" style="background:${activeTab === 'coupons' ? '#f85606' : '#555'}; padding:8px 14px;">Coupons</a>
+                        <a href="/admin-dashboard?tab=settings" class="btn" style="background:${activeTab === 'settings' ? '#f85606' : '#555'}; padding:8px 14px;">Settings</a>
                     </div>
-
-                    <div id="reviewsModal" style="display:none; position:fixed; z-index:9998; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); justify-content:center; align-items:center;">
-                        <div style="background:white; width:90%; max-width:500px; max-height:80vh; overflow-y:auto; padding:20px; border-radius:8px; position:relative;">
-                            <button onclick="closeAdminModal('reviewsModal')" style="position:absolute; top:10px; right:15px; background:none; border:none; font-size:20px; cursor:pointer;">✕</button>
-                            <h3 style="margin-top:0;">⭐ All Customer Reviews</h3>
-                            <div>${allReviewsHTML.length ? allReviewsHTML : '<p style="color:#777;">No reviews available.</p>'}</div>
+                    
+                    ${activeTab === 'pending' || activeTab === 'confirmed' || activeTab === 'completed' || activeTab === 'cancelled' || activeTab === 'trash' ? `
+                        <h4>Orders (${activeTab.toUpperCase()})</h4>
+                        ${ordersHTML.length ? ordersHTML : '<div style="background:white; padding:20px; text-align:center; border-radius:6px;"><p>No orders found.</p></div>'}
+                    ` : ''}
+                    
+                    ${activeTab === 'products' ? `
+                        <h4>Manage Products</h4>
+                        ${productsHTML}
+                    ` : ''}
+                    
+                    ${activeTab === 'addproduct' ? `
+                        <div style="background:white; padding:20px; border-radius:6px; max-width:600px;">
+                            <h4>Add New Product</h4>
+                            <form action="/api/add-product" method="POST" enctype="multipart/form-data">
+                                <label style="font-size:13px;">Product Name:</label><br>
+                                <input type="text" name="name" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                                
+                                <label style="font-size:13px;">Category:</label><br>
+                                <select name="category" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;">
+                                    <option value="Fashion">फ্যাশন</option>
+                                    <option value="Supershop">সুপার শপ</option>
+                                    <option value="Pharmacy">ফার্মেসি</option>
+                                    <option value="Food">খাদ্যপণ্য</option>
+                                    <option value="Sports">স্পোর্টস</option>
+                                    <option value="Books">বই</option>
+                                    <option value="Stationery">স্টেশনারি</option>
+                                    <option value="HomeDecor">হোম ডেকোর ও ফার্নিচার</option>
+                                    <option value="BeautyCare">বিউটি পার্লার কেয়ার</option>
+                                    <option value="Electric">ইলেকট্রিক</option>
+                                </select><br>
+                                
+                                <label style="font-size:13px;">Price (৳):</label><br>
+                                <input type="number" name="price" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                                
+                                <label style="font-size:13px;">Stock Quantity:</label><br>
+                                <input type="number" name="stock" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                                
+                                <label style="font-size:13px;">Maximum Order Limit (গ্রাহক একবারে সর্বোচ্চ কয়টি অর্ডার করতে পারবে):</label><br>
+                                <input type="number" name="maxOrderLimit" value="5" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                                
+                                <label style="font-size:13px;">Main Image:</label><br>
+                                <input type="file" name="mainImage" style="width:100%; margin:3px 0 10px 0;" required><br>
+                                
+                                <label style="font-size:13px;">Gallery Images (Up to 5):</label><br>
+                                <input type="file" name="gallery" multiple style="width:100%; margin:3px 0 10px 0;"><br>
+                                
+                                <label style="font-size:13px;">Description:</label><br>
+                                <textarea name="description" style="width:100%; height:70px; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"></textarea><br>
+                                
+                                <button type="submit" class="btn">Add Product</button>
+                            </form>
                         </div>
-                    </div>
-                    <div id="productsModal" style="display:none; position:fixed; z-index:9998; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); justify-content:center; align-items:center;">
-                        <div style="background:white; width:90%; max-width:500px; max-height:80vh; overflow-y:auto; padding:20px; border-radius:8px; position:relative;">
-                            <button onclick="closeAdminModal('productsModal')" style="position:absolute; top:10px; right:15px; background:none; border:none; font-size:20px; cursor:pointer;">✕</button>
-                            <h3 style="margin-top:0;">📦 All Products List</h3>
-                            <div>${allProductsHTML.length ? allProductsHTML : '<p style="color:#777;">No products available.</p>'}</div>
+                    ` : ''}
+                    
+                    ${activeTab === 'users' ? `
+                        <h4>Manage Users & COD Restriction</h4>
+                        ${usersHTML.length ? usersHTML : '<p>No users found.</p>'}
+                    ` : ''}
+                    
+                    ${activeTab === 'chats' ? `
+                        <h4>Customer Q&A Inbox</h4>
+                        ${chatsHTML.length ? chatsHTML : '<p>No customer messages.</p>'}
+                    ` : ''}
+                    
+                    ${activeTab === 'coupons' ? `
+                        <div style="background:white; padding:20px; border-radius:6px; max-width:600px; margin-bottom:15px;">
+                            <h4>Create Coupon</h4>
+                            <form action="/api/add-coupon" method="POST">
+                                <label style="font-size:13px;">Coupon Code:</label><br>
+                                <input type="text" name="code" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                                
+                                <label style="font-size:13px;">Discount Amount (৳):</label><br>
+                                <input type="number" name="discountAmount" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                                
+                                <button type="submit" class="btn">Save Coupon</button>
+                            </form>
                         </div>
-                    </div>
-                    <div id="lowStockModal" style="display:none; position:fixed; z-index:9998; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); justify-content:center; align-items:center;">
-                        <div style="background:white; width:90%; max-width:500px; max-height:80vh; overflow-y:auto; padding:20px; border-radius:8px; position:relative;">
-                            <button onclick="closeAdminModal('lowStockModal')" style="position:absolute; top:10px; right:15px; background:none; border:none; font-size:20px; cursor:pointer;">✕</button>
-                            <h3 style="margin-top:0; color:#dc3545;">⚠️ Low Stock Products</h3>
-                            <div>${lowStockHTML.length ? lowStockHTML : '<p style="color:#777;">No low stock products.</p>'}</div>
+                        <h4>Existing Coupons</h4>
+                        ${couponsHTML}
+                    ` : ''}
+                    
+                    ${activeTab === 'settings' ? `
+                        <div style="background:white; padding:20px; border-radius:6px; max-width:600px;">
+                            <h4>Payment Gateway Numbers</h4>
+                            <form action="/api/update-settings" method="POST">
+                                <label style="font-size:13px;">bKash Number:</label><br>
+                                <input type="text" name="bkashNumber" value="${siteSetting.bkashNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                                
+                                <label style="font-size:13px;">Nagad Number:</label><br>
+                                <input type="text" name="nagadNumber" value="${siteSetting.nagadNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                                
+                                <button type="submit" class="btn">Update Settings</button>
+                            </form>
                         </div>
-                    </div>
-                    <div id="confirmedOrdersModal" style="display:none; position:fixed; z-index:9998; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); justify-content:center; align-items:center;">
-                        <div style="background:white; width:90%; max-width:500px; max-height:80vh; overflow-y:auto; padding:20px; border-radius:8px; position:relative;">
-                            <button onclick="closeAdminModal('confirmedOrdersModal')" style="position:absolute; top:10px; right:15px; background:none; border:none; font-size:20px; cursor:pointer;">✕</button>
-                            <h3 style="margin-top:0; color:#007bff;">📋 Confirmed Orders</h3>
-                            <div>${confirmedOrdersHTML.length ? confirmedOrdersHTML : '<p style="color:#777;">No confirmed orders.</p>'}</div>
-                        </div>
-                    </div>
-
-                    <script>
-                        function openAdminModal(modalId) {
-                            document.getElementById(modalId).style.display = 'flex';
-                        }
-                        function closeAdminModal(modalId) {
-                            document.getElementById(modalId).style.display = 'none';
-                        }
-                    </script>
-
-                    <div style="display:flex; gap:10px; margin-bottom:15px; overflow-x:auto; background:white; padding:10px; border-radius:6px;">
-                        <a href="/admin-dashboard?tab=pending" class="btn" style="background:${activeTab === 'pending' ? '#f85606' : '#ccc'}; font-size:13px; padding:8px 12px;">Pending Orders (${pendingCount})</a>
-                        <a href="/admin-dashboard?tab=confirmed" class="btn" style="background:${activeTab === 'confirmed' ? '#f85606' : '#ccc'}; font-size:13px; padding:8px 12px;">Confirmed (${confirmedCount})</a>
-                        <a href="/admin-dashboard?tab=delivered" class="btn" style="background:${activeTab === 'delivered' ? '#f85606' : '#ccc'}; font-size:13px; padding:8px 12px;">Delivered (${completedCount})</a>
-                        <a href="/admin-dashboard?tab=cancelled" class="btn" style="background:${activeTab === 'cancelled' ? '#f85606' : '#ccc'}; font-size:13px; padding:8px 12px;">Cancelled (${cancelledCount})</a>
-                        <a href="/admin-dashboard?tab=trash" class="btn" style="background:${activeTab === 'trash' ? '#f85606' : '#ccc'}; font-size:13px; padding:8px 12px;">Trash (${trashCount})</a>
-                    </div>
-
-                    <h3 style="margin-bottom:10px;">Orders Management (${activeTab.toUpperCase()})</h3>
-                    <div>${ordersHTML.length ? ordersHTML : '<div style="background:white; padding:20px; text-align:center; border-radius:6px;"><p>No orders found in this section.</p></div>'}</div>
-
-                    <hr style="margin:30px 0; border:0; border-top:1px solid #ccc;">
-                    <h3 style="margin-bottom:10px;">💬 Customer Chats & Inquiries</h3>
-                    <div>${chatsHTML.length ? chatsHTML : '<p style="background:white; padding:15px; border-radius:6px;">No chats available.</p>'}</div>
-
-                    <hr style="margin:30px 0; border:0; border-top:1px solid #ccc;">
-                    <h3 style="margin-bottom:10px;">👤 User COD Restriction Management</h3>
-                    <div>${usersHTML.length ? usersHTML : '<p style="background:white; padding:15px; border-radius:6px;">No users found.</p>'}</div>
-
-                    <hr style="margin:30px 0; border:0; border-top:1px solid #ccc;">
-                    <h3 style="margin-bottom:10px;">🎟️ Coupon Management</h3>
-                    <div>${couponsHTML.length ? couponsHTML : '<p style="background:white; padding:15px; border-radius:6px;">No coupons found.</p>'}</div>
-
-                    <hr style="margin:30px 0; border:0; border-top:1px solid #ccc;">
-                    <h3 style="margin-bottom:10px;">📦 Products Management</h3>
-                    <div>${productsHTML.length ? productsHTML : '<p style="background:white; padding:15px; border-radius:6px;">No products found.</p>'}</div>
+                    ` : ''}
                 </div>
             </body>
             </html>
@@ -1717,12 +1679,73 @@ app.get('/admin-dashboard', async (req, res, next) => {
     }
 });
 
-// ================= Global Error Handler & Server Start =================
-app.use((err, req, res, next) => {
-    console.error("Server Error: ", err);
-    res.status(500).send(`<div style="padding:20px; font-family:sans-serif;"><h2 style="color:red;">Something went wrong!</h2><p>${err.message}</p><a href="/">Go Back to Home</a></div>`);
+app.post('/api/add-product', upload.fields([{ name: 'mainImage', maxCount: 1 }, { name: 'gallery', maxCount: 5 }]), async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        const { name, category, price, stock, maxOrderLimit, description } = req.body;
+        let mainImageFilename = '';
+        if (req.files['mainImage'] && req.files['mainImage'][0]) {
+            mainImageFilename = req.files['mainImage'][0].filename;
+        }
+        let galleryFilenames = [];
+        if (req.files['gallery']) {
+            galleryFilenames = req.files['gallery'].map(f => f.filename);
+        }
+        await new Product({
+            name,
+            category,
+            price: Number(price),
+            stock: Number(stock),
+            maxOrderLimit: Number(maxOrderLimit) || 5,
+            description,
+            mainImage: mainImageFilename,
+            gallery: galleryFilenames
+        }).save();
+        res.redirect('/admin-dashboard?tab=products');
+    } catch (err) {
+        next(err);
+    }
 });
 
+app.post('/api/add-coupon', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        const { code, discountAmount } = req.body;
+        await new Coupon({
+            code: code.trim(),
+            discountAmount: Number(discountAmount)
+        }).save();
+        res.redirect('/admin-dashboard?tab=coupons');
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.post('/api/update-settings', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        const { bkashNumber, nagadNumber } = req.body;
+        let setting = await SiteSetting.findOne();
+        if (setting) {
+            setting.bkashNumber = bkashNumber;
+            setting.nagadNumber = nagadNumber;
+            await setting.save();
+        } else {
+            await new SiteSetting({ bkashNumber, nagadNumber }).save();
+        }
+        res.redirect('/admin-dashboard?tab=settings');
+    } catch (err) {
+        next(err);
+    }
+});
+
+// ================= Global Error Handling Middleware =================
+app.use((err, req, res, next) => {
+    console.error("Server Error: ", err);
+    res.status(500).send(`<div style="padding:20px; font-family:sans-serif;"><h3>Something went wrong!</h3><p>${err.message}</p><a href="/">Go Home</a></div>`);
+});
+
+// ================= Start Server =================
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
