@@ -1412,7 +1412,7 @@ app.get('/admin-dashboard', async (req, res, next) => {
                     </div>
                 </div>
                 <div>
-                    <input type="text" value="http://localhost:3000/product/${p._id}" readonly style="font-size:11px; padding:4px; width:150px;" onclick="this.select()">
+                    <input type="text" value="https://oneline-shop.onrender.com/product/${p._id}" readonly style="font-size:11px; padding:4px; width:150px;" onclick="this.select()">
                     <a href="/admin/delete-product/${p._id}" class="btn" style="background:#dc3545; padding:5px 8px; font-size:11px;">Delete</a>
                 </div>
             </div>
