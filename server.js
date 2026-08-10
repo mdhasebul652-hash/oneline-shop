@@ -1547,8 +1547,19 @@ app.get('/admin-dashboard', async (req, res, next) => {
                                     <label style="font-size:13px; font-weight:600;">Main Image:</label>
                                     <input type="file" name="mainImage" style="width:100%; padding:6px;" required>
                                 </div>
-                            </div>
                             
+                            <!-- অতিরিক্ত ছবি দেওয়ার অপশন -->
+<div style="margin-top: 10px;">
+    <label><b>Additional Images (Multiple):</b></label><br>
+    <input type="file" name="additionalImages" multiple accept="image/*">
+</div>
+
+<!-- ভিডিও বা রিলস দেওয়ার অপশন -->
+<div style="margin-top: 10px;">
+    <label><b>Product Video / Reels Video:</b></label><br>
+    <input type="file" name="productVideo" accept="video/*">
+</div>
+
                             <div style="background:#eef9ff; padding:10px; border-radius:4px; border:1px dashed #007bff;">
                                 <label style="font-size:13px; font-weight:600; color:#007bff;"><input type="checkbox" name="publishToFacebook" value="true"> সরাসরি ফেসবুক পেজে রিয়েল ভিডিও/ছবি ও অর্ডার লিংক সহ পোস্ট করুন</label>
                                 <p style="font-size:11px; color:#555; margin:3px 0 0 0;">(চেক বক্স দিলে প্রোডাক্টের ছবি/ভিডিও ফেসবুক পেজে সরাসরি চলে যাবে এবং সাথে 'Order Now' বাটন ও প্রোডাক্ট লিংক যুক্ত থাকবে।)</p>
