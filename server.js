@@ -1639,10 +1639,10 @@ app.post('/admin/add-product', upload.fields([
 
         const { name, category, price, stock, maxOrderLimit, deliveryCharge, description } = req.body;
         
-        let mainImage = req.files && req.files.mainImage ? req.files.mainImage[0].filename : '';
-        let additionalImages = req.files && req.files.additionalImages ? req.files.additionalImages.map(file => file.filename) : [];
-        let productVideo = req.files && req.files.productVideo ? req.files.productVideo[0].filename : '';
-       
+let mainImage = req.files && req.files.mainImage ? req.files.mainImage[0].filename : '';
+let additionalImages = req.files && req.files.additionalImages ? req.files.additionalImages.map(file => file.filename) : [];
+let productVideo = req.files && req.files.productVideo ? req.files.productVideo[0].filename : '';
+     
         let newProd = new Product({
             name,
             category,
