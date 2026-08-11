@@ -56,11 +56,14 @@ const productSchema = new mongoose.Schema({
     deliveryCharge: { type: Number, default: 150 },
     description: { type: String, default: '' },
     mainImage: { type: String, default: '' },
-    gallery: [String],
+    additionalImages: [String],
+    productVideo: { type: String, default: '' },
     soldCount: { type: Number, default: 0 },
     createdAt: { type: Date, default: Date.now }
 });
+
 const Product = mongoose.model('Product', productSchema);
+
 
 const reviewSchema = new mongoose.Schema({
     productId: { type: String, required: true },
@@ -1638,12 +1641,12 @@ app.post('/admin/add-product', upload.fields([
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
 
         const { name, category, price, stock, maxOrderLimit, deliveryCharge, description } = req.body;
-        
-let mainImage = req.files && req.files.mainImage ? req.files.mainImage[0].filename : '';
-let additionalImages = req.files && req.files.additionalImages ? req.files.additionalImages.map(file => file.filename) : [];
-let productVideo = req.files && req.files.productVideo ? req.files.productVideo[0].filename : '';
-     
-        let newProd = new Product({
+
+        const mainImage = req.files && req.files.mainImage ? req.files.mainImage[0].filename : '';
+        const additionalImages = req.files && req.files.additionalImages ? req.files.additionalImages.map(file => file.filename) : [];
+        const productVideo = req.files && req.files.productVideo ? req.files.productVideo[0].filename : '';
+
+        const newProd = new Product({
             name,
             category,
             price: Number(price),
@@ -1653,6 +1656,17 @@ let productVideo = req.files && req.files.productVideo ? req.files.productVideo[
             description,
             mainImage,
             additionalImages,
+            productVideo
+        });
+
+        await newProd.save();
+        res.redirect('/admin/dashboard');
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Error: " + err.message);
+    }
+});
+
             productVideo
         });
 
