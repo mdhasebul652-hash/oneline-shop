@@ -1630,12 +1630,19 @@ app.post('/admin/update-settings', async (req, res, next) => {
     }
 });
 
-app.post('/admin/add-product', upload.single('mainImage'), async (req, res, next) => {
+app.post('/admin/add-product', upload.fields([
+    { name: 'mainImage', maxCount: 1 },
+    { name: 'additionalImages', maxCount: 10 },
+    { name: 'productVideo', maxCount: 1 }
+]), async (req, res, next) => {
     try {
-        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        const { name, category, price, stock, maxOrderLimit, deliveryCharge, description, publishToFacebook } = req.body;
-        let mainImage = req.file ? req.file.filename : '';
+        if (!req.user || !req.user.role !== 'admin') return res.redirect('/login');
+        const { name, category, price, stock, maxOrderLimit, deliveryCharge, description } = req.body;
         
+        let mainImage = req.files && req.files.mainImage ? req.files.mainImage[0].filename : '';
+        let additionalImages = req.files && req.files.additionalImages ? req.files.additionalImages.map(file => file.filename) : [];
+        let productVideo = req.files && req.files.productVideo ? req.files.productVideo[0].filename : '';
+       
         let newProd = new Product({
             name,
             category,
@@ -1644,10 +1651,13 @@ app.post('/admin/add-product', upload.single('mainImage'), async (req, res, next
             maxOrderLimit: Number(maxOrderLimit) || 5,
             deliveryCharge: Number(deliveryCharge) || 150,
             description,
-            mainImage
+            mainImage,
+            additionalImages,
+            productVideo
         });
-        await newProd.save();
 
+        await newProd.save();
+        
         // If direct Facebook Publish option is checked
         if(publishToFacebook === 'true' && mainImage) {
             await new FbContent({
