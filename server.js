@@ -1661,19 +1661,10 @@ app.post('/admin/add-product', upload.fields([
 
         await newProd.save();
         res.redirect('/admin/dashboard');
-    } catch (err) {
-        console.error(err);
-        res.status(500).send("Error: " + err.message);
-    }
-});
-
-            productVideo
-        });
-
         await newProd.save();
         
         // If direct Facebook Publish option is checked
-        if(publishToFacebook === 'true' && mainImage) {
+        if (publishToFacebook === 'true' && mainImage) {
             await new FbContent({
                 title: `🔥 নতুন পণ্য: ${name} - মূল্য: ৳${price}`,
                 mediaUrl: mainImage,
@@ -1682,11 +1673,14 @@ app.post('/admin/add-product', upload.fields([
             }).save();
         }
 
-        res.redirect('/admin-dashboard');
+        res.redirect('/admin/dashboard');
     } catch (err) {
-        next(err);
+        console.error(err);
+        res.status(500).send("Error: " + err.message);
     }
 });
+
+
 
 app.get('/admin/delete-product/:id', async (req, res, next) => {
     try {
