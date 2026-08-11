@@ -19,9 +19,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
-
-const uploadDir = path.join(__dirname, 'public', 'uploads');
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)){
     fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -286,14 +285,14 @@ app.get('/', async (req, res, next) => {
         let products = await Product.find(query).sort({ _id: -1 });
         let fbContents = await FbContent.find().sort({ _id: -1 });
         
-        let productsHTML = products.map(p => `
-            <div class="product-card" onclick="window.location.href='/product/${p._id}'">
-                <img src="/uploads/${p.mainImage}" alt="${p.name}" onclick="event.stopPropagation(); openImageModal('/uploads/${p.mainImage}');">
-                <h4>${p.name}</h4>
-                <div class="price">৳${p.price}</div>
-                <div style="font-size:11px; color:#888;">Stock: ${p.stock} | Max Limit: ${p.maxOrderLimit || 5}</div>
-            </div>
-        `).join('');
+    let productsHTML = products.map(p => `
+        <div class="product-card" onclick="window.location.href='/product/${p._id}'" style="cursor: pointer;">
+            <img src="/uploads/${p.mainImage}" alt="${p.name}">
+            <div class="price">৳${p.price}</div>
+            <div style="font-size:11px; color:#888;">Stock: ${p.stock} | Max Limit: ${p.maxOrderLimit || ''}</div>
+        </div>
+    `).join('');
+
         
         let fbHTML = fbContents.map(fb => `
             <div style="background:white; padding:15px; margin-bottom:15px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
@@ -1636,7 +1635,8 @@ app.post('/admin/add-product', upload.fields([
     { name: 'productVideo', maxCount: 1 }
 ]), async (req, res, next) => {
     try {
-        if (!req.user || !req.user.role !== 'admin') return res.redirect('/login');
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+
         const { name, category, price, stock, maxOrderLimit, deliveryCharge, description } = req.body;
         
         let mainImage = req.files && req.files.mainImage ? req.files.mainImage[0].filename : '';
