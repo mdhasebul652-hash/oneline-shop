@@ -1611,11 +1611,8 @@ app.get('/admin-dashboard', async (req, res, next) => {
     }
 });
 
-app.post('/admin/add-product', upload.fields([
-    { name: 'mainImage', maxCount: 1 },
-    { name: 'additionalImages', maxCount: 10 },
-    { name: 'productVideo', maxCount: 1 }
-]), async (req, res, next) => {
+app.post('/admin/add-product', upload.any()
+ async (req, res, next) => {
     try {
         if (!req.files) req.files = {};
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
