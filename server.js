@@ -1627,7 +1627,7 @@ app.post('/admin/add-product', upload.fields([
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         
         // publishToFacebook ফিল্ডটি এখানে রিসিভ করতে হবে
-        const { name, category, price, stock, maxOrderLimit, deliveryCharge, description, publishToFacebook } = req.body;
+        const { name, category, price, stock, maxOrderLimit, deliveryCharge, description} = req.body;
         
     let mainImage = '';
     if (req.files && req.files.mainImage && req.files.mainImage[0]) {
