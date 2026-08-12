@@ -2,6 +2,12 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cookieParser = require('cookie-parser');
 const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
@@ -1623,10 +1629,26 @@ app.post('/admin/add-product', upload.fields([
         // publishToFacebook ফিল্ডটি এখানে রিসিভ করতে হবে
         const { name, category, price, stock, maxOrderLimit, deliveryCharge, description, publishToFacebook } = req.body;
         
-        const mainImage = req.files && req.files.mainImage ? req.files.mainImage[0].filename : '';
-        const additionalImages = req.files && req.files.additionalImages ? req.files.additionalImages.map(file => file.filename) : [];
-        const productVideo = req.files && req.files.productVideo ? req.files.productVideo[0].filename : '';
-        
+    let mainImage = '';
+    if (req.files && req.files.mainImage && req.files.mainImage[0]) {
+      const result = await cloudinary.uploader.upload(req.files.mainImage[0].path);
+      mainImage = result.secure_url;
+    }
+
+    let additionalImages = [];
+    if (req.files && req.files.additionalImages) {
+      for (const file of req.files.additionalImages) {
+        const result = await cloudinary.uploader.upload(file.path);
+        additionalImages.push(result.secure_url);
+      }
+    }
+
+    let productVideo = '';
+    if (req.files && req.files.productVideo && req.files.productVideo[0]) {
+      const result = await cloudinary.uploader.upload(req.files.productVideo[0].path, { resource_type: 'video' });
+      productVideo = result.secure_url;
+    }
+S
         const newProd = new Product({
             name,
             category,
