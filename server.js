@@ -1405,7 +1405,7 @@ app.get('/admin-dashboard', async (req, res, next) => {
         let productsHTML = products.map(p => `
             <div style="background:#fff; padding:10px; margin-bottom:8px; border-radius:4px; border:1px solid #eee; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <img src="/uploads/${p.mainImage}" width="40" height="40" style="object-fit:cover; border-radius:4px; cursor:pointer;" onclick="openImageModal('/uploads/${p.mainImage}')">
+                    <img src="${p.mainImage}" width="40" height="40" style="object-fit:cover; border-radius:4px; cursor:pointer;" onclick="openImageModal('/uploads/${p.mainImage}')">
                     <div>
                         <b style="font-size:13px;">${p.name}</b><br>
                         <span style="font-size:12px; color:#f85606;">৳${p.price} | Stock: ${p.stock}</span><br>
