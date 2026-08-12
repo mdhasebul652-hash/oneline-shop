@@ -1634,8 +1634,7 @@ app.post('/admin/add-product', upload.fields([
             console.log("Main image upload error:", err);
         }
     }
-
-    let additionalImages = [];
+        let additionalImages = [];
     if (req.files && req.files.additionalImages) {
         for (const file of req.files.additionalImages) {
             try {
