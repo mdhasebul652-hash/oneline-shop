@@ -1630,18 +1630,25 @@ app.post('/admin/add-product', upload.fields([
         // publishToFacebook ফিল্ডটি এখানে রিসিভ করতে হবে
         const { name, category, price, stock, maxOrderLimit, deliveryCharge, description, publishToFacebook } = req.body;
         
-    let mainImage = '';
     if (req.files && req.files.mainImage && req.files.mainImage[0]) {
-      const result = await cloudinary.uploader.upload(req.files.mainImage[0].path);
-      mainImage = result.secure_url;
+        try {
+            const result = await cloudinary.uploader.upload(req.files.mainImage[0].path);
+            mainImage = result.secure_url;
+        } catch (err) {
+            console.log("Main image upload error:", err);
+        }
     }
 
     let additionalImages = [];
     if (req.files && req.files.additionalImages) {
-      for (const file of req.files.additionalImages) {
-        const result = await cloudinary.uploader.upload(file.path);
-        additionalImages.push(result.secure_url);
-      }
+        for (const file of req.files.additionalImages) {
+            try {
+                const result = await cloudinary.uploader.upload(file.path);
+                additionalImages.push(result.secure_url);
+            } catch (err) {
+                console.log("Additional image upload error:", err);
+            }
+        }
     }
 
     let productVideo = '';
