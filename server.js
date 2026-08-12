@@ -1627,7 +1627,7 @@ app.post('/admin/add-product', upload.fields([
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         
         // publishToFacebook ফিল্ডটি এখানে রিসিভ করতে হবে
-        const { name, category, price, stock, maxOrderLimit, deliveryCharge, description} = req.body;
+        const { name, category, price, stock, maxOrderLimit, deliveryCharge, description, publishToFacebook } = req.body;
         
     let mainImage = '';
     if (req.files && req.files.mainImage && req.files.mainImage[0]) {
@@ -1648,7 +1648,6 @@ app.post('/admin/add-product', upload.fields([
       const result = await cloudinary.uploader.upload(req.files.productVideo[0].path, { resource_type: 'video' });
       productVideo = result.secure_url;
     }
-S
         const newProd = new Product({
             name,
             category,
