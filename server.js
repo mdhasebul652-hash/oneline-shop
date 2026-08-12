@@ -261,7 +261,7 @@ const getNavbarHTML = (user) => `
                         } else {
                             container.innerHTML = chats.map(c => 
                                 '<div style="background: #f9f9f9; padding: 8px; margin-bottom: 8px; border-radius: 4px; display:flex; gap:8px; align-items:center;">' +
-                                    (c.productImage ? '<img src="/uploads/' + c.productImage + '" style="width: 45px; height: 45px; object-fit: cover; border-radius: 4px; border:1px solid #ccc; cursor:pointer;" onclick="openImageModal(\'/uploads/' + c.productImage + '\')">' : '') +
+                                    (c.productImage ? '<img src="' + c.productImage + '" style="width: 45px; height: 45px; object-fit: cover; border-radius: 4px; border:1px solid #ccc; cursor:pointer;" onclick="openImageModal(\'/uploads/' + c.productImage + '\')">' : '') +
                                     '<div style="flex:1;">' +
                                         '<p style="margin: 0 0 2px 0; font-weight: bold; color: #333; font-size: 13px;">পণ্য: ' + (c.productName || 'N/A') + '</p>' +
                                         '<p style="margin: 0 0 2px 0; color: #555; font-size: 12px;">প্রশ্ন: ' + c.message + '</p>' +
