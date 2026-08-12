@@ -1623,9 +1623,12 @@ app.post('/admin/add-product', upload.fields([
         // publishToFacebook ফিল্ডটি এখানে রিসিভ করতে হবে
         const { name, category, price, stock, maxOrderLimit, deliveryCharge, description, publishToFacebook } = req.body;
         
+    let mainImage = '';
     if (req.files && req.files.mainImage && req.files.mainImage[0]) {
         try {
-            const result = await cloudinary.uploader.upload(req.files.mainImage[0].path);
+            const b64 = Buffer.from(req.files.mainImage[0].buffer).toString("base64");
+            let dataURI = "data:" + req.files.mainImage[0].mimetype + ";base64," + b64;
+            const result = await cloudinary.uploader.upload(dataURI);
             mainImage = result.secure_url;
         } catch (err) {
             console.log("Main image upload error:", err);
@@ -1636,7 +1639,9 @@ app.post('/admin/add-product', upload.fields([
     if (req.files && req.files.additionalImages) {
         for (const file of req.files.additionalImages) {
             try {
-                const result = await cloudinary.uploader.upload(file.path);
+                const b64 = Buffer.from(file.buffer).toString("base64");
+                let dataURI = "data:" + file.mimetype + ";base64," + b64;
+                const result = await cloudinary.uploader.upload(dataURI);
                 additionalImages.push(result.secure_url);
             } catch (err) {
                 console.log("Additional image upload error:", err);
@@ -1646,21 +1651,28 @@ app.post('/admin/add-product', upload.fields([
 
     let productVideo = '';
     if (req.files && req.files.productVideo && req.files.productVideo[0]) {
-      const result = await cloudinary.uploader.upload(req.files.productVideo[0].path, { resource_type: 'video' });
-      productVideo = result.secure_url;
+        try {
+            const b64 = Buffer.from(req.files.productVideo[0].buffer).toString("base64");
+            let dataURI = "data:" + req.files.productVideo[0].mimetype + ";base64," + b64;
+            const result = await cloudinary.uploader.upload(dataURI, { resource_type: 'video' });
+            productVideo = result.secure_url;
+        } catch (err) {
+            console.log("Product video upload error:", err);
+        }
     }
-        const newProd = new Product({
-            name,
-            category,
-            price: Number(price),
-            stock: Number(stock),
-            maxOrderLimit: Number(maxOrderLimit) || 5,
-            deliveryCharge: Number(deliveryCharge) || 150,
-            description,
-            mainImage,
-            additionalImages,
-            productVideo
-        });
+
+    const newProd = new Product({
+        name,
+        category,
+        price: Number(price),
+        stock: Number(stock),
+        maxOrderLimit: Number(maxOrderLimit) || 5,
+        deliveryCharge: Number(deliveryCharge) || 150,
+        description,
+        mainImage,
+        additionalImages,
+        productVideo
+    });
         
         await newProd.save();
         
