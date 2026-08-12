@@ -13,13 +13,11 @@ const path = require('path');
 const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3000;
-
 // ================= Database Connection (MongoDB Atlas) =================
 const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://hasebul:hasebul1234@hasebul.v1tb47m.mongodb.net/?appName=hasebul';
 mongoose.connect(MONGO_URI)
     .then(() => console.log("MongoDB Connected Successfully"))
     .catch(err => console.log("DB Connection Error: ", err));
-
 // ================= Middlewares & Setup =================
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -30,10 +28,8 @@ const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)){
     fs.mkdirSync(uploadDir, { recursive: true });
 }
-
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
-
 // ================= Mongoose Schemas & Models =================
 const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
@@ -45,7 +41,6 @@ const userSchema = new mongoose.Schema({
     isBlocked: { type: Boolean, default: false }
 });
 const User = mongoose.model('User', userSchema);
-
 const productSchema = new mongoose.Schema({
     name: { type: String, required: true },
     category: { type: String, required: true },
@@ -60,10 +55,7 @@ const productSchema = new mongoose.Schema({
     soldCount: { type: Number, default: 0 },
     createdAt: { type: Date, default: Date.now }
 });
-
 const Product = mongoose.model('Product', productSchema);
-
-
 const reviewSchema = new mongoose.Schema({
     productId: { type: String, required: true },
     userEmail: { type: String, required: true },
@@ -72,14 +64,12 @@ const reviewSchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now }
 });
 const Review = mongoose.model('Review', reviewSchema);
-
 const couponSchema = new mongoose.Schema({
     code: { type: String, required: true, unique: true },
     discountAmount: { type: Number, required: true },
     createdAt: { type: Date, default: Date.now }
 });
 const Coupon = mongoose.model('Coupon', couponSchema);
-
 const orderSchema = new mongoose.Schema({
     userEmail: String,
     userName: { type: String, default: '' },
@@ -101,7 +91,6 @@ const orderSchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now }
 });
 const Order = mongoose.model('Order', orderSchema);
-
 const chatSchema = new mongoose.Schema({
     productId: String,
     productName: String,
@@ -112,7 +101,6 @@ const chatSchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now }
 });
 const Chat = mongoose.model('Chat', chatSchema);
-
 const fbContentSchema = new mongoose.Schema({
     title: String,
     mediaUrl: String,
@@ -121,7 +109,6 @@ const fbContentSchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now }
 });
 const FbContent = mongoose.model('FbContent', fbContentSchema);
-
 const siteSettingSchema = new mongoose.Schema({
     bkashNumber: { type: String, default: '01700000000' },
     nagadNumber: { type: String, default: '01800000000' },
@@ -129,7 +116,6 @@ const siteSettingSchema = new mongoose.Schema({
     accessToken: { type: String, default: '' }
 });
 const SiteSetting = mongoose.model('SiteSetting', siteSettingSchema);
-
 // Middleware to load logged-in user
 app.use(async (req, res, next) => {
     try {
@@ -143,12 +129,10 @@ app.use(async (req, res, next) => {
     }
     next();
 });
-
 // Categories list for auto-selection in admin & frontend
 const ALL_CATEGORIES = [
     'Fashion', 'Supershop', 'Pharmacy', 'Food', 'Sports', 'Books', 'Stationery', 'HomeDecor', 'BeautyCare', 'Electric'
 ];
-
 // ================= Global Header & Image Modal Setup =================
 const globalHeaderHTML = `
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -199,7 +183,6 @@ const globalHeaderHTML = `
         }
     </script>
 `;
-
 const getNavbarHTML = (user) => `
     <header>
         <a href="/" class="logo">🛒 Online Shop</a>
@@ -278,7 +261,6 @@ const getNavbarHTML = (user) => `
         </script>
     ` : ''}
 `;
-
 // ================= Public & Homepage Routes =================
 app.get('/', async (req, res, next) => {
     try {
@@ -287,14 +269,13 @@ app.get('/', async (req, res, next) => {
         let products = await Product.find(query).sort({ _id: -1 });
         let fbContents = await FbContent.find().sort({ _id: -1 });
         
-    let productsHTML = products.map(p => `
-        <div class="product-card" onclick="window.location.href='/product/${p._id}'" style="cursor: pointer;">
-            <img src="/uploads/${p.mainImage}" alt="${p.name}">
-            <div class="price">৳${p.price}</div>
-            <div style="font-size:11px; color:#888;">Stock: ${p.stock} | Max Limit: ${p.maxOrderLimit || ''}</div>
-        </div>
-    `).join('');
-
+        let productsHTML = products.map(p => `
+            <div class="product-card" onclick="window.location.href='/product/${p._id}'" style="cursor: pointer;">
+                <img src="/uploads/${p.mainImage}" alt="${p.name}">
+                <div class="price">৳${p.price}</div>
+                <div style="font-size:11px; color:#888;">Stock: ${p.stock} | Max Limit: ${p.maxOrderLimit || ''}</div>
+            </div>
+        `).join('');
         
         let fbHTML = fbContents.map(fb => `
             <div style="background:white; padding:15px; margin-bottom:15px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
@@ -303,7 +284,6 @@ app.get('/', async (req, res, next) => {
                 <br><a href="${fb.productLink || '/'}" class="btn btn-buy" style="margin-top:10px; display:inline-block;">⚡ Order Now (Buy Direct)</a>
             </div>
         `).join('');
-
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -324,7 +304,6 @@ app.get('/', async (req, res, next) => {
         next(err);
     }
 });
-
 app.get('/category/:name', async (req, res, next) => {
     try {
         let catName = req.params.name;
@@ -353,7 +332,6 @@ app.get('/category/:name', async (req, res, next) => {
         next(err);
     }
 });
-
 app.get('/search', async (req, res, next) => {
     try {
         let keyword = req.query.q || '';
@@ -389,7 +367,6 @@ app.get('/search', async (req, res, next) => {
         next(err);
     }
 });
-
 // Product Details Page
 app.get('/product/:id', async (req, res, next) => {
     try {
@@ -428,7 +405,6 @@ app.get('/product/:id', async (req, res, next) => {
                 <div class="price" style="font-size:15px;">৳${p.price}</div>
             </div>
         `).join('');
-
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -540,7 +516,6 @@ app.get('/product/:id', async (req, res, next) => {
         next(err);
     }
 });
-
 app.post('/api/add-review', async (req, res, next) => {
     try {
         if (!req.user) return res.redirect('/login');
@@ -556,7 +531,6 @@ app.post('/api/add-review', async (req, res, next) => {
         next(err);
     }
 });
-
 app.post('/api/chat', async (req, res, next) => {
     try {
         let email = req.user ? req.user.email : 'Guest User';
@@ -572,7 +546,6 @@ app.post('/api/chat', async (req, res, next) => {
         next(err);
     }
 });
-
 app.get('/api/user-chats-json', async (req, res, next) => {
     try {
         if (!req.user) return res.json([]);
@@ -582,7 +555,6 @@ app.get('/api/user-chats-json', async (req, res, next) => {
         res.json([]);
     }
 });
-
 // ================= Shopping Cart System =================
 app.get('/api/add-to-cart/:id', async (req, res, next) => {
     try {
@@ -622,7 +594,6 @@ app.get('/api/add-to-cart/:id', async (req, res, next) => {
         next(err);
     }
 });
-
 app.get('/api/update-cart-qty/:id/:action', async (req, res, next) => {
     try {
         let productId = req.params.id;
@@ -652,7 +623,6 @@ app.get('/api/update-cart-qty/:id/:action', async (req, res, next) => {
         next(err);
     }
 });
-
 app.get('/api/remove-from-cart/:id', (req, res) => {
     let productId = req.params.id;
     let cart = req.cookies.cart ? JSON.parse(req.cookies.cart) : [];
@@ -660,7 +630,6 @@ app.get('/api/remove-from-cart/:id', (req, res) => {
     res.cookie('cart', JSON.stringify(cart));
     res.redirect('/cart');
 });
-
 app.get('/cart', async (req, res, next) => {
     try {
         let cart = req.cookies.cart ? JSON.parse(req.cookies.cart) : [];
@@ -708,7 +677,6 @@ app.get('/cart', async (req, res, next) => {
         next(err);
     }
 });
-
 // ================= Cart Checkout & Order Flow (Mandatory Address & Phone Validation) =================
 app.get('/cart-checkout', async (req, res, next) => {
     try {
@@ -733,7 +701,6 @@ app.get('/cart-checkout', async (req, res, next) => {
                 <span style="font-size:13px;">• ${i.productName} (৳${i.price} × ${i.quantity || 1})</span>
             </div>
         `).join('');
-
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -890,7 +857,6 @@ app.get('/cart-checkout', async (req, res, next) => {
         next(err);
     }
 });
-
 app.post('/api/place-cart-order', async (req, res, next) => {
     try {
         if (!req.user) return res.redirect('/login');
@@ -944,7 +910,6 @@ app.post('/api/place-cart-order', async (req, res, next) => {
         next(err);
     }
 });
-
 // ================= Buy Now Direct Checkout Flow =================
 app.get('/buy-now/:id', async (req, res, next) => {
     try {
@@ -1132,7 +1097,6 @@ app.get('/buy-now/:id', async (req, res, next) => {
         next(err);
     }
 });
-
 app.post('/api/verify-coupon', async (req, res, next) => {
     try {
         let { code } = req.body;
@@ -1146,7 +1110,6 @@ app.post('/api/verify-coupon', async (req, res, next) => {
         next(err);
     }
 });
-
 app.post('/api/place-order', async (req, res, next) => {
     try {
         if (!req.user) return res.redirect('/login');
@@ -1203,7 +1166,6 @@ app.post('/api/place-order', async (req, res, next) => {
         next(err);
     }
 });
-
 // ================= User Authentication & Dashboard =================
 app.get('/login', (req, res) => {
     let redirectUrl = req.query.redirect || '/';
@@ -1231,7 +1193,6 @@ app.get('/login', (req, res) => {
         </html>
     `);
 });
-
 app.post('/api/login', async (req, res, next) => {
     try {
         const { email, password, redirect } = req.body;
@@ -1245,7 +1206,6 @@ app.post('/api/login', async (req, res, next) => {
         next(err);
     }
 });
-
 app.get('/register', (req, res) => {
     let redirectUrl = req.query.redirect || '/dashboard';
     res.send(`
@@ -1272,7 +1232,6 @@ app.get('/register', (req, res) => {
         </html>
     `);
 });
-
 app.post('/api/register', async (req, res, next) => {
     try {
         const { email, password, redirect } = req.body;
@@ -1288,12 +1247,10 @@ app.post('/api/register', async (req, res, next) => {
         next(err);
     }
 });
-
 app.get('/logout', (req, res) => {
     res.clearCookie('userSession');
     res.redirect('/');
 });
-
 app.get('/dashboard', async (req, res, next) => {
     try {
         if (!req.user) return res.redirect('/login');
@@ -1343,7 +1300,6 @@ app.get('/dashboard', async (req, res, next) => {
         next(err);
     }
 });
-
 app.post('/api/update-profile', async (req, res, next) => {
     try {
         if (!req.user) return res.redirect('/login');
@@ -1354,7 +1310,6 @@ app.post('/api/update-profile', async (req, res, next) => {
         next(err);
     }
 });
-
 app.get('/my-orders', async (req, res, next) => {
     try {
         if (!req.user) return res.redirect('/login');
@@ -1366,7 +1321,6 @@ app.get('/my-orders', async (req, res, next) => {
                 <p style="margin:0 0 5px 0; font-size:13px;">Status: <b style="color:#f85606;">${o.status}</b></p>
             </div>
         `).join('');
-
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -1384,11 +1338,9 @@ app.get('/my-orders', async (req, res, next) => {
         next(err);
     }
 });
-
 app.get('/wishlist', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><title>Wishlist</title>${globalHeaderHTML}</head><body>${getNavbarHTML(req.user)}<div class="container"><h3>Wishlist feature coming soon!</h3></div></body></html>`);
 });
-
 // ================= Admin Panel Advanced Features =================
 app.get('/admin-dashboard', async (req, res, next) => {
     try {
@@ -1401,7 +1353,6 @@ app.get('/admin-dashboard', async (req, res, next) => {
         let siteSetting = await SiteSetting.findOne() || { bkashNumber: '01700000000', nagadNumber: '01800000000', pageId: '', accessToken: '' };
         
         let categoryOptions = ALL_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('');
-
         let productsHTML = products.map(p => `
             <div style="background:#fff; padding:10px; margin-bottom:8px; border-radius:4px; border:1px solid #eee; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                 <div style="display:flex; align-items:center; gap:8px;">
@@ -1418,7 +1369,6 @@ app.get('/admin-dashboard', async (req, res, next) => {
                 </div>
             </div>
         `).join('');
-
         let ordersHTML = orders.map(o => `
             <div style="background:#fff; padding:10px; margin-bottom:10px; border-radius:6px; border:1px solid #ddd; font-size:13px;">
                 <p style="margin:0 0 4px 0;"><b>Order ID:</b> ${o._id} | <b>Status:</b> <span style="color:#f85606;">${o.status}</span></p>
@@ -1437,7 +1387,6 @@ app.get('/admin-dashboard', async (req, res, next) => {
                 </form>
             </div>
         `).join('');
-
         let usersHTML = users.map(u => `
             <div style="background:#fff; padding:8px; margin-bottom:6px; border-radius:4px; border:1px solid #eee; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
                 <div>
@@ -1445,162 +1394,133 @@ app.get('/admin-dashboard', async (req, res, next) => {
                     <span>Phone: ${u.phone || 'N/A'} | Addr: ${u.address || 'N/A'}</span>
                 </div>
                 <div>
-                    <span style="color:${u.isBlocked ? 'red' : 'green'}; font-weight:bold; font-size:11px;">${u.isBlocked ? 'COD Blocked' : 'Active'}</span>
-                    <a href="/admin/toggle-block/${u._id}" class="btn" style="background:${u.isBlocked ? '#28a745' : '#dc3545'}; padding:3px 8px; font-size:11px; margin-left:5px;">${u.isBlocked ? 'Unblock' : 'Block COD'}</a>
+                    <span style="color:${u.isBlocked ? 'red' : 'green'}; font-weight:bold; margin-right:8px;">${u.isBlocked ? 'Blocked (COD Off)' : 'Active'}</span>
+                    <a href="/admin/toggle-block-user/${u._id}" class="btn" style="background:${u.isBlocked ? '#28a745' : '#dc3545'}; padding:4px 8px; font-size:11px;">${u.isBlocked ? 'Unblock' : 'Block COD'}</a>
                 </div>
             </div>
         `).join('');
-
         let chatsHTML = chats.map(c => `
-            <div style="background:#fff; padding:10px; margin-bottom:8px; border-radius:4px; border:1px solid #eee; display:flex; gap:10px; align-items:center;">
-                ${c.productImage ? `<img src="/uploads/${c.productImage}" width="50" height="50" style="object-fit:cover; border-radius:4px; border:1px solid #ccc; cursor:pointer;" onclick="openImageModal('/uploads/${c.productImage}')">` : ''}
-                <div style="flex:1; font-size:13px;">
-                    <p style="margin:0 0 3px 0;"><b>User (${c.userEmail}):</b> ${c.message}</p>
-                    <p style="margin:0 0 5px 0; color:#555;"><b>Product:</b> ${c.productName || 'N/A'}</p>
-                    <form action="/admin/reply-chat/${c._id}" method="POST" style="display:flex; gap:6px;">
-                        <input type="text" name="reply" value="${c.reply || ''}" placeholder="Write reply..." style="flex:1; padding:4px; font-size:12px;" required>
-                        <button type="submit" class="btn" style="padding:4px 8px; font-size:12px;">Send Reply</button>
-                    </form>
-                </div>
+            <div style="background:#fff; padding:10px; margin-bottom:8px; border-radius:4px; border:1px solid #eee; font-size:13px;">
+                <p style="margin:0 0 4px 0;"><b>User:</b> ${c.userEmail} | <b>Product:</b> ${c.productName || 'N/A'}</p>
+                <p style="margin:0 0 4px 0; color:#333;"><b>Question:</b> ${c.message}</p>
+                <form action="/admin/reply-chat/${c._id}" method="POST" style="margin-top:6px; display:flex; gap:6px;">
+                    <input type="text" name="reply" value="${c.reply || ''}" placeholder="Write reply..." style="flex:1; padding:4px; font-size:12px;" required>
+                    <button type="submit" class="btn" style="padding:4px 10px; font-size:12px;">Reply</button>
+                </form>
             </div>
         `).join('');
-
-        let couponsHTML = coupons.map(co => `
-            <div style="background:#fff; padding:8px; margin-bottom:5px; border-radius:4px; border:1px solid #eee; display:flex; justify-content:space-between; align-items:center; font-size:13px;">
-                <span><b>${co.code}</b> - Discount: ৳${co.discountAmount}</span>
-                <a href="/admin/delete-coupon/${co._id}" class="btn" style="background:#dc3545; padding:3px 6px; font-size:11px;">Delete</a>
+        let couponsHTML = coupons.map(coup => `
+            <div style="background:#fff; padding:8px; margin-bottom:6px; border-radius:4px; border:1px solid #eee; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
+                <span><b>Code:</b> ${coup.code} | <b>Discount:</b> ৳${coup.discountAmount}</span>
+                <a href="/admin/delete-coupon/${coup._id}" class="btn" style="background:#dc3545; padding:4px 8px; font-size:11px;">Delete</a>
             </div>
         `).join('');
-
+        
         res.send(`
             <!DOCTYPE html>
             <html>
             <head><title>Admin Dashboard</title>${globalHeaderHTML}</head>
             <body>
                 ${getNavbarHTML(req.user)}
-                <div class="container">
-                    <h2 style="margin-top:0;">⚙️ Admin Control Panel</h2>
+                <div class="container" style="background:white; padding:20px; border-radius:6px;">
+                    <h2 style="margin-top:0; color:#f85606;">⚙️ Admin Control Panel</h2>
                     
-                    <!-- Settings Section (Bkash / Nagad Number Editor & FB Token) -->
-                    <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-top:0;">💳 বিকাশ ও নগদ নাম্বার এবং ফেসবুক পেজ সেটিংস</h3>
-                        <form action="/admin/update-settings" method="POST" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">
-                            <div>
-                                <label style="font-size:12px; font-weight:600;">বিকাশ পার্সোনাল/মার्चেন্ট:</label>
-                                <input type="text" name="bkashNumber" value="${siteSetting.bkashNumber}" style="width:100%; padding:8px; font-size:13px; border:1px solid #ccc; border-radius:4px;" required>
-                            </div>
-                            <div>
-                                <label style="font-size:12px; font-weight:600;">নগদ পার্সোনাল/মার্চেন্ট:</label>
-                                <input type="text" name="nagadNumber" value="${siteSetting.nagadNumber}" style="width:100%; padding:8px; font-size:13px; border:1px solid #ccc; border-radius:4px;" required>
-                            </div>
-                            <div>
-                                <label style="font-size:12px; font-weight:600;">Facebook Page ID:</label>
-                                <input type="text" name="pageId" value="${siteSetting.pageId || ''}" style="width:100%; padding:8px; font-size:13px; border:1px solid #ccc; border-radius:4px;">
-                            </div>
-                            <div>
-                                <label style="font-size:12px; font-weight:600;">Facebook Access Token:</label>
-                                <input type="text" name="accessToken" value="${siteSetting.accessToken || ''}" style="width:100%; padding:8px; font-size:13px; border:1px solid #ccc; border-radius:4px;">
-                            </div>
-                            <div style="grid-column: 1 / -1;">
-                                <button type="submit" class="btn" style="padding:8px 16px;">Save Settings</button>
-                            </div>
-                        </form>
+                    <div style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap;">
+                        <a href="#addProductSec" class="btn" style="padding:8px 12px; font-size:13px;">+ Add Product</a>
+                        <a href="#ordersSec" class="btn" style="padding:8px 12px; font-size:13px;">📦 Orders (${orders.length})</a>
+                        <a href="#usersSec" class="btn" style="padding:8px 12px; font-size:13px;">👥 Users (${users.length})</a>
+                        <a href="#chatsSec" class="btn" style="padding:8px 12px; font-size:13px;">💬 Q&A (${chats.length})</a>
+                        <a href="#couponsSec" class="btn" style="padding:8px 12px; font-size:13px;">🏷️ Coupons</a>
+                        <a href="#settingsSec" class="btn" style="padding:8px 12px; font-size:13px;">🛠️ Settings</a>
                     </div>
-
-                    <!-- Add Product & Direct FB Publish Section -->
-                    <div style="background:white; padding:15px; border-radius:6px; margin-bottom:15px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-top:0;">➕ Add New Product & Direct Facebook Publish</h3>
-                        <form action="/admin/add-product" method="POST" enctype="multipart/form-data" style="display:flex; flex-direction:column; gap:10px;">
-                            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px;">
-                                <div>
-                                    <label style="font-size:13px; font-weight:600;">Product Name:</label>
-                                    <input type="text" name="name" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" required>
-                                </div>
-                                <div>
-                                    <label style="font-size:13px; font-weight:600;">Category (অটো ফাংশন):</label>
-                                    <select name="category" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" required>
-                                        ${categoryOptions}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label style="font-size:13px; font-weight:600;">Price (৳):</label>
-                                    <input type="number" name="price" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" required>
-                                </div>
-                                <div>
-                                    <label style="font-size:13px; font-weight:600;">Stock:</label>
-                                    <input type="number" name="stock" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" required>
-                                </div>
-                                <div>
-                                    <label style="font-size:13px; font-weight:600;">Max Order Limit:</label>
-                                    <input type="number" name="maxOrderLimit" value="5" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
-                                </div>
-                                <div>
-                                    <label style="font-size:13px; font-weight:600;">Delivery Charge:</label>
-                                    <input type="number" name="deliveryCharge" value="150" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
-                                </div>
+                    
+                    <hr style="margin:20px 0;">
+                    <h3 id="addProductSec">Add New Product</h3>
+                    <form action="/admin/add-product" method="POST" enctype="multipart/form-data" style="background:#f9f9f9; padding:15px; border-radius:6px; margin-bottom:20px;">
+                        <label style="font-size:13px;">Product Name:</label><br>
+                        <input type="text" name="name" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                        
+                        <label style="font-size:13px;">Category:</label><br>
+                        <select name="category" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required>
+                            ${categoryOptions}
+                        </select><br>
+                        
+                        <div style="display:flex; gap:10px;">
+                            <div style="flex:1;">
+                                <label style="font-size:13px;">Price (৳):</label><br>
+                                <input type="number" name="price" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required>
                             </div>
-                            <div>
-                                <label style="font-size:13px; font-weight:600;">Description:</label>
-                                <textarea name="description" style="width:100%; height:60px; padding:8px; border:1px solid #ccc; border-radius:4px;"></textarea>
+                            <div style="flex:1;">
+                                <label style="font-size:13px;">Stock Qty:</label><br>
+                                <input type="number" name="stock" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required>
                             </div>
-                            <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                                <div style="flex:1;">
-                                    <label style="font-size:13px; font-weight:600;">Main Image:</label>
-                                    <input type="file" name="mainImage" style="width:100%; padding:6px;" required>
-                                </div>
-                            
-                            <!-- অতিরিক্ত ছবি দেওয়ার অপশন -->
-<div style="margin-top: 10px;">
-    <label><b>Additional Images (Multiple):</b></label><br>
-    <input type="file" name="additionalImages" multiple accept="image/*">
-</div>
-
-<!-- ভিডিও বা রিলস দেওয়ার অপশন -->
-<div style="margin-top: 10px;">
-    <label><b>Product Video / Reels Video:</b></label><br>
-    <input type="file" name="productVideo" accept="video/*">
-</div>
-
-                            <div style="background:#eef9ff; padding:10px; border-radius:4px; border:1px dashed #007bff;">
-                                <label style="font-size:13px; font-weight:600; color:#007bff;"><input type="checkbox" name="publishToFacebook" value="true"> সরাসরি ফেসবুক পেজে রিয়েল ভিডিও/ছবি ও অর্ডার লিংক সহ পোস্ট করুন</label>
-                                <p style="font-size:11px; color:#555; margin:3px 0 0 0;">(চেক বক্স দিলে প্রোডাক্টের ছবি/ভিডিও ফেসবুক পেজে সরাসরি চলে যাবে এবং সাথে 'Order Now' বাটন ও প্রোডাক্ট লিংক যুক্ত থাকবে।)</p>
-                            </div>
-                            
-                            <button type="submit" class="btn btn-buy" style="padding:10px;">Add Product</button>
-                        </form>
-                    </div>
-
-                    <!-- Manage Products, Orders, Users, Coupons & Chats -->
-                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:15px;">
-                        <div style="background:white; padding:15px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); max-height:450px; overflow-y:auto;">
-                            <h3>📦 Products Management & Links</h3>
-                            <div>${productsHTML}</div>
                         </div>
                         
-                        <div style="background:white; padding:15px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); max-height:450px; overflow-y:auto;">
-                            <h3>📋 Pending & All Orders</h3>
-                            <div>${ordersHTML}</div>
-                        </div>
-
-                        <div style="background:white; padding:15px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); max-height:450px; overflow-y:auto;">
-                            <h3>👥 Users Information & Control</h3>
-                            <div>${usersHTML}</div>
-                        </div>
-
-                        <div style="background:white; padding:15px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); max-height:450px; overflow-y:auto;">
-                            <h3>💬 Customer Chats & Inquiries</h3>
-                            <div>${chatsHTML}</div>
+                        <div style="display:flex; gap:10px;">
+                            <div style="flex:1;">
+                                <label style="font-size:13px;">Max Order Limit:</label><br>
+                                <input type="number" name="maxOrderLimit" value="5" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;">
+                            </div>
+                            <div style="flex:1;">
+                                <label style="font-size:13px;">Delivery Charge (৳):</label><br>
+                                <input type="number" name="deliveryCharge" value="150" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;">
+                            </div>
                         </div>
                         
-                        <div style="background:white; padding:15px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); max-height:450px; overflow-y:auto;">
-                            <h3>🎟️ Coupons Management</h3>
-                            <form action="/admin/add-coupon" method="POST" style="margin-bottom:10px; display:flex; gap:5px;">
-                                <input type="text" name="code" placeholder="Coupon Code" style="flex:1; padding:6px; font-size:12px;" required>
-                                <input type="number" name="discountAmount" placeholder="Discount ৳" style="width:80px; padding:6px; font-size:12px;" required>
-                                <button type="submit" class="btn" style="padding:6px 10px; font-size:12px;">Add</button>
-                            </form>
-                            <div>${couponsHTML}</div>
-                        </div>
+                        <label style="font-size:13px;">Description:</label><br>
+                        <textarea name="description" style="width:100%; height:60px; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"></textarea><br>
+                        
+                        <label style="font-size:13px;">Main Image:</label><br>
+                        <input type="file" name="mainImage" style="margin:3px 0 10px 0;" required><br>
+                        
+                        <button type="submit" class="btn" style="padding:8px 16px;">Save Product</button>
+                    </form>
+                    
+                    <hr style="margin:20px 0;">
+                    <h3 id="ordersSec">Manage Orders</h3>
+                    <div style="max-height:400px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px; margin-bottom:20px;">
+                        ${ordersHTML.length ? ordersHTML : '<p style="color:#777;">No orders found.</p>'}
+                    </div>
+                    
+                    <hr style="margin:20px 0;">
+                    <h3 id="usersSec">Manage Users & COD Restrictions</h3>
+                    <div style="max-height:300px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px; margin-bottom:20px;">
+                        ${usersHTML.length ? usersHTML : '<p style="color:#777;">No users found.</p>'}
+                    </div>
+                    
+                    <hr style="margin:20px 0;">
+                    <h3 id="chatsSec">Customer Q&A Inbox</h3>
+                    <div style="max-height:300px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px; margin-bottom:20px;">
+                        ${chatsHTML.length ? chatsHTML : '<p style="color:#777;">No chats found.</p>'}
+                    </div>
+                    
+                    <hr style="margin:20px 0;">
+                    <h3 id="couponsSec">Manage Coupons</h3>
+                    <form action="/admin/add-coupon" method="POST" style="background:#f9f9f9; padding:15px; border-radius:6px; margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
+                        <input type="text" name="code" placeholder="Coupon Code" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px;" required>
+                        <input type="number" name="discountAmount" placeholder="Discount Amount (৳)" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px;" required>
+                        <button type="submit" class="btn" style="padding:8px 16px;">Add Coupon</button>
+                    </form>
+                    <div style="background:#f9f9f9; padding:10px; border-radius:6px; margin-bottom:20px;">
+                        ${couponsHTML.length ? couponsHTML : '<p style="color:#777;">No coupons found.</p>'}
+                    </div>
+                    
+                    <hr style="margin:20px 0;">
+                    <h3 id="settingsSec">Site Settings & Payment Numbers</h3>
+                    <form action="/admin/update-settings" method="POST" style="background:#f9f9f9; padding:15px; border-radius:6px; margin-bottom:20px;">
+                        <label style="font-size:13px;">bKash Number:</label><br>
+                        <input type="text" name="bkashNumber" value="${siteSetting.bkashNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                        
+                        <label style="font-size:13px;">Nagad Number:</label><br>
+                        <input type="text" name="nagadNumber" value="${siteSetting.nagadNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br>
+                        
+                        <button type="submit" class="btn" style="padding:8px 16px;">Update Settings</button>
+                    </form>
+                    
+                    <hr style="margin:20px 0;">
+                    <h3>All Products List</h3>
+                    <div style="max-height:400px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px;">
+                        ${productsHTML.length ? productsHTML : '<p style="color:#777;">No products found.</p>'}
                     </div>
                 </div>
             </body>
@@ -1611,86 +1531,30 @@ app.get('/admin-dashboard', async (req, res, next) => {
     }
 });
 
-app.post('/admin/add-product', upload.any(), async (req, res, next) => {
+// Admin Actions Backend Routes
+app.post('/admin/add-product', upload.single('mainImage'), async (req, res, next) => {
     try {
-        if (!req.files) req.files = {};
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-
-        // publishToFacebook ফিল্ডটি এখানে রিসিভ করতে হবে
-        const { name, category, price, stock, maxOrderLimit, deliveryCharge, description, publishToFacebook } = req.body;
-        
-    let mainImage = '';
-    if (req.files && req.files.mainImage && req.files.mainImage[0]) {
-        try {
-            const b64 = Buffer.from(req.files.mainImage[0].buffer).toString("base64");
-            let dataURI = "data:" + req.files.mainImage[0].mimetype + ";base64," + b64;
-            const result = await cloudinary.uploader.upload(dataURI);
-            mainImage = result.secure_url;
-        } catch (err) {
-            console.log("Main image upload error:", err);
+        let mainImageFilename = '';
+        if (req.file) {
+            mainImageFilename = Date.now() + '-' + req.file.originalname;
+            fs.writeFileSync(path.join(uploadDir, mainImageFilename), req.file.buffer);
         }
-    }
-        let additionalImages = [];
-    if (req.files && req.files.additionalImages) {
-        for (const file of req.files.additionalImages) {
-            try {
-                const b64 = Buffer.from(file.buffer).toString("base64");
-                let dataURI = "data:" + file.mimetype + ";base64," + b64;
-                const result = await cloudinary.uploader.upload(dataURI);
-                additionalImages.push(result.secure_url);
-            } catch (err) {
-                console.log("Additional image upload error:", err);
-            }
-        }
-    }
-
-    let productVideo = '';
-    if (req.files && req.files.productVideo && req.files.productVideo[0]) {
-        try {
-            const b64 = Buffer.from(req.files.productVideo[0].buffer).toString("base64");
-            let dataURI = "data:" + req.files.productVideo[0].mimetype + ";base64," + b64;
-            const result = await cloudinary.uploader.upload(dataURI, { resource_type: 'video' });
-            productVideo = result.secure_url;
-        } catch (err) {
-            console.log("Product video upload error:", err);
-        }
-    }
-
-    const newProd = new Product({
-        name,
-        category,
-        price: Number(price),
-        stock: Number(stock),
-        maxOrderLimit: Number(maxOrderLimit) || 5,
-        deliveryCharge: Number(deliveryCharge) || 150,
-        description,
-        mainImage,
-        additionalImages,
-        productVideo
-    });
-        
-        await newProd.save();
-        
-        // যদি সরাসরি ফেসবুক পেজে পাবলিশ অপশন চেক করা থাকে
-        if (publishToFacebook === 'true' && mainImage) {
-            await new FbContent({
-                title: `🔥 নতুন পণ্য: ${name} - মূল্য: ৳${price}`,
-                mediaUrl: mainImage,
-                mediaType: 'image',
-                productLink: `https://oneline-shop.onrender.com/product/${newProd._id}`
-            }).save();
-        }
-        
-        // সঠিক অ্যাডমিন ড্যাশবোর্ড রাউটে রিডাইরেক্ট করা হলো
+        await new Product({
+            name: req.body.name,
+            category: req.body.category,
+            price: Number(req.body.price),
+            stock: Number(req.body.stock),
+            maxOrderLimit: Number(req.body.maxOrderLimit) || 5,
+            deliveryCharge: Number(req.body.deliveryCharge) || 150,
+            description: req.body.description || '',
+            mainImage: mainImageFilename
+        }).save();
         res.redirect('/admin-dashboard');
     } catch (err) {
-        console.error(err);
-        res.status(500).send("Error: " + err.message);
+        next(err);
     }
 });
-
-
-
 
 app.get('/admin/delete-product/:id', async (req, res, next) => {
     try {
@@ -1706,7 +1570,7 @@ app.post('/admin/update-order-status/:id', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         let order = await Order.findById(req.params.id);
-        if(order) {
+        if (order) {
             order.previousStatus = order.status;
             order.status = req.body.status;
             await order.save();
@@ -1717,13 +1581,13 @@ app.post('/admin/update-order-status/:id', async (req, res, next) => {
     }
 });
 
-app.get('/admin/toggle-block/:id', async (req, res, next) => {
+app.get('/admin/toggle-block-user/:id', async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
-        let user = await User.findById(req.params.id);
-        if(user) {
-            user.isBlocked = !user.isBlocked;
-            await user.save();
+        let targetUser = await User.findById(req.params.id);
+        if (targetUser) {
+            targetUser.isBlocked = !targetUser.isBlocked;
+            await targetUser.save();
         }
         res.redirect('/admin-dashboard');
     } catch (err) {
@@ -1762,7 +1626,25 @@ app.get('/admin/delete-coupon/:id', async (req, res, next) => {
     }
 });
 
-// ================= Server Startup =================
+app.post('/admin/update-settings', async (req, res, next) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
+        const { bkashNumber, nagadNumber } = req.body;
+        let setting = await SiteSetting.findOne();
+        if (setting) {
+            setting.bkashNumber = bkashNumber;
+            setting.nagadNumber = nagadNumber;
+            await setting.save();
+        } else {
+            await new SiteSetting({ bkashNumber, nagadNumber }).save();
+        }
+        res.redirect('/admin-dashboard');
+    } catch (err) {
+        next(err);
+    }
+});
+
+// Start Server
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
