@@ -1611,8 +1611,7 @@ app.get('/admin-dashboard', async (req, res, next) => {
     }
 });
 
-app.post('/admin/add-product', upload.any()
- async (req, res, next) => {
+app.post('/admin/add-product', upload.any(), async (req, res, next) => {
     try {
         if (!req.files) req.files = {};
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
