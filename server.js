@@ -1618,11 +1618,7 @@ app.get('/admin-dashboard', async (req, res, next) => {
     }
 });
 
-app.post('/admin/add-product', upload.fields([
-    { name: 'mainImage', maxCount: 1 },
-    { name: 'additionalImages', maxCount: 10 },
-    { name: 'productVideo', maxCount: 1 }
-]), async (req, res, next) => {
+app.post('/admin/add-product', upload.any(), async (req, res, next) => {
     try {
         if (!req.user || req.user.role !== 'admin') return res.redirect('/login');
         
@@ -1669,7 +1665,7 @@ app.post('/admin/add-product', upload.fields([
                 title: `🔥 নতুন পণ্য: ${name} - মূল্য: ৳${price}`,
                 mediaUrl: mainImage,
                 mediaType: 'image',
-                productLink: `http://localhost:3000/product/${newProd._id}`
+                productLink: `https://oneline-shop.onrender.com/product/${newProd._id}`
             }).save();
         }
         
