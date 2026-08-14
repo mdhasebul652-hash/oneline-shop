@@ -526,7 +526,7 @@ function setMainProductImage(index, element) {
   const item = galleryImages[Number(index)];
   const main = document.getElementById('mainProductImg');
   if (!item || !main) return;
-  selectedImage = item.raw;
+  selectedImage = item.raw || item.src || '';
   main.src = item.src || resolveGalleryUrl(item.raw);
   document.querySelectorAll('.thumb-img').forEach(t => {
     t.style.border = '1px solid #ccc';
@@ -534,19 +534,26 @@ function setMainProductImage(index, element) {
   if (element) element.style.border = '2px solid #f85606';
   updateOrderLinks();
 }
+function refreshQtyUI() {
+  const display = document.getElementById('qtyDisplay');
+  if (display) display.textContent = String(currentQty);
+  const minus = document.getElementById('qtyMinusBtn');
+  const plus = document.getElementById('qtyPlusBtn');
+  if (minus) minus.disabled = currentQty <= 1;
+  if (plus) plus.disabled = currentQty >= maxLimit || currentQty >= stockAvail;
+}
 function incrementQty() {
-  if (currentQty < maxLimit && currentQty < stockAvail) {
-    currentQty++;
-    document.getElementById('qtyDisplay').innerText = currentQty;
+  const allowedMax = Math.max(1, Math.min(Number(maxLimit) || 1, Number(stockAvail) || 1));
+  if (currentQty < allowedMax) {
+    currentQty += 1;
+    refreshQtyUI();
     updateOrderLinks();
-  } else {
-    alert('দুঃখিত, সর্বোচ্চ অর্ডারের লিমিট ' + maxLimit + ' টি অথবা স্টক শেষ!');
   }
 }
 function decrementQty() {
   if (currentQty > 1) {
-    currentQty--;
-    document.getElementById('qtyDisplay').innerText = currentQty;
+    currentQty -= 1;
+    refreshQtyUI();
     updateOrderLinks();
   }
 }
@@ -558,7 +565,21 @@ function updateOrderLinks() {
   if (buyBtn) buyBtn.href = '/buy-now/' + productId + '?qty=' + currentQty + '&selectedImage=' + encodedImage;
   if (cartBtn) cartBtn.href = '/api/add-to-cart/' + productId + '?qty=' + currentQty + '&selectedImage=' + encodedImage;
 }
-document.addEventListener('DOMContentLoaded', () => { updateOrderLinks(); });
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.thumb-img').forEach((thumb, idx) => {
+    thumb.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      setMainProductImage(idx, thumb);
+    });
+  });
+  const minusBtn = document.getElementById('qtyMinusBtn');
+  const plusBtn = document.getElementById('qtyPlusBtn');
+  if (minusBtn) { minusBtn.onclick = (ev) => { ev.preventDefault(); decrementQty(); }; }
+  if (plusBtn) { plusBtn.onclick = (ev) => { ev.preventDefault(); incrementQty(); }; }
+  refreshQtyUI();
+  updateOrderLinks();
+});
 </script> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ratings & Reviews</h3> <form action="/api/add-review" method="POST" style="background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:15px;"> <input type="hidden" name="productId" value="${product._id}"> <label style="font-size:13px; font-weight:600;">Rate this product:</label> <select name="rating" style="padding:5px; margin-bottom:8px; border-radius:4px; border:1px solid #ccc;" required> <option value="5">★★★★★ (5 Stars)</option> <option value="4">★★★★☆ (4 Stars)</option> <option value="3">★★★☆☆ (3 Stars)</option> <option value="2">★★☆☆☆ (2 Stars)</option> <option value="1">★☆☆☆☆ (1 Star)</option> </select><br> <textarea name="comment" placeholder="Write your review here..." style="width:100%; height:50px; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required></textarea> <button type="submit" class="btn" style="padding:6px 12px; font-size:12px; margin-top:5px;">Submit Review</button> </form> <div>${reviewsHTML.length ? reviewsHTML : '<p style="color:#777; font-size:13px;">No reviews yet.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>You May Also Like</h3> <div class="product-grid" style="margin-top:10px;">${relatedHTML.length ? relatedHTML : '<p>No related products.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ask Question About This Product</h3> <form action="/api/chat" method="POST"> <input type="hidden" name="productId" value="${product._id}"> <input type="hidden" name="productName" value="${product.name}"> <input type="hidden" name="productImage" value="${product.mainImage}"> <textarea name="message" placeholder="Ask your question here..." style="width:100%; height:70px; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea><br> <button type="submit" class="btn" style="margin-top:6px; padding:8px 14px;">Send Question</button> </form> <div style="margin-top:20px;"> <h4 style="margin-bottom:10px;">Customer Q&A (পণ্যের বিষয়ে আপনার ও এডমিনের কথোপকথন):</h4> ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions yet.</p>'} </div> </div> </body> </html> `);
 } catch (err) {
 next(err);
@@ -980,16 +1001,35 @@ res.send(`<!DOCTYPE html><html><head><title>Sub Admin Registration</title>${glob
 });
 app.post('/sub-admin/register', async (req, res, next) => {
 try {
+if (!dbReady()) return res.status(503).send(`<script>alert('Database এখনো সংযুক্ত হয়নি। কিছুক্ষণ পরে আবার চেষ্টা করুন।'); window.location.href='/sub-admin/register';</script>`);
 const { email, password, name, phone, shopName, address, whatsapp, businessInfo } = req.body;
 const selectedCategories=Array.isArray(req.body.businessCategories)?req.body.businessCategories:[req.body.businessCategories].filter(Boolean);
 const validCategories=selectedCategories.filter(c=>ALL_CATEGORIES.includes(String(c)));
 if (!isValidWhatsAppContact(whatsapp)) return res.send(`<script>alert('সঠিক WhatsApp Number / wa.me Link বাধ্যতামূলক।'); window.history.back();</script>`);
 if (!String(address||'').trim()) return res.send(`<script>alert('ঠিকানা বাধ্যতামূলক।'); window.history.back();</script>`);
 if (!validCategories.length) return res.send(`<script>alert('কমপক্ষে একটি Business Category নির্বাচন করুন।'); window.history.back();</script>`);
-let existing = await User.findOne({ email });
-if (existing) return res.send(`<script>alert('এই Email আগে থেকেই আছে।'); window.location.href='/sub-admin/register';</script>`);
+let existing = await User.findOne({ email: normalizeEmail(email) });
+if (existing && ['admin','subadmin'].includes(existing.role)) return res.send(`<script>alert('এই Email দিয়ে ইতিমধ্যে Admin/Sub Admin account আছে।'); window.location.href='/sub-admin/register';</script>`);
+if (existing && existing.role === 'user') {
+  existing.name = name || existing.name || '';
+  existing.phone = phone || existing.phone || '';
+  existing.address = address || existing.address || '';
+  existing.subAdminStatus = 'pending';
+  existing.activationPlan = 'paid';
+  existing.subAdminShopName = shopName || existing.subAdminShopName || '';
+  existing.subAdminWhatsApp = whatsapp || existing.subAdminWhatsApp || '';
+  existing.subAdminBusinessInfo = businessInfo || existing.subAdminBusinessInfo || '';
+  existing.subAdminBusinessCategories = validCategories;
+  existing.role = 'subadmin';
+  existing.approvedBy = '';
+  existing.approvedAt = null;
+  existing.activationExpiresAt = null;
+  existing.unlimitedFree = false;
+  await existing.save();
+  return res.send(`<script>alert('আপনার বর্তমান User account-টিকেই Sub Admin আবেদন হিসেবে Main Admin-এর কাছে পাঠানো হয়েছে।'); window.location.href='/login';</script>`);
+}
 const hashedPassword = await bcrypt.hash(password, 10);
-await new User({ email, password: hashedPassword, role:'subadmin', name, phone, address, subAdminStatus:'pending', activationPlan:'paid', subAdminShopName:shopName || '', subAdminWhatsApp:whatsapp || '', subAdminBusinessInfo:businessInfo || '', subAdminBusinessCategories:validCategories }).save();
+await new User({ email: normalizeEmail(email), password: hashedPassword, role:'subadmin', name, phone, address, subAdminStatus:'pending', activationPlan:'paid', subAdminShopName:shopName || '', subAdminWhatsApp:whatsapp || '', subAdminBusinessInfo:businessInfo || '', subAdminBusinessCategories:validCategories }).save();
 res.send(`<script>alert('আপনার Sub Admin আবেদন Main Admin-এর কাছে পাঠানো হয়েছে। অনুমোদনের পরে Login করতে পারবেন।'); window.location.href='/login';</script>`);
 } catch (err) { next(err); }
 });
@@ -1077,10 +1117,10 @@ let ordersHTML = orders.map(o => `
 <p style="margin:0 0 6px 0;"><b>Total Amount:</b> ৳${o.totalAmount}</p>
 <div style="display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 8px 0;">
 ${(o.items || []).map(item => {
-  const img = item.mainImage ? (String(item.mainImage).startsWith('/uploads/') ? item.mainImage : '/uploads/' + item.mainImage) : '';
+  const img = item.mainImage ? mediaUrl(item.mainImage) : '';
   return `<div style="display:flex; align-items:center; gap:6px; background:#f8f8f8; border:1px solid #eee; border-radius:5px; padding:5px;">
     ${img ? `<img src="${img}" width="55" height="55" style="object-fit:cover; border-radius:4px; cursor:pointer;" onclick="openImageModal('${img}')">` : ''}
-    <div><b>${item.name || 'Product'}</b><br><span>৳${item.price || 0} × ${item.quantity || 1}</span></div>
+    <div><b>${item.productName || item.name || 'Product'}</b><br><span>৳${item.price || 0} × ${item.quantity || 1}</span></div>
   </div>`;
 }).join('')}
 </div>
