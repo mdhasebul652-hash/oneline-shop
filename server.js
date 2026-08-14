@@ -785,18 +785,25 @@ style="font-size:13px; color:#666;">Standard Delivery Charge:
 (function(){
   function organizeAdminDashboard(){
     const root=document.querySelector('.container');
-    if(!root || document.body.dataset.adminOrganized==='1') return;
-    document.body.dataset.adminOrganized='1';
+    if(!root || root.dataset.adminOrganized==='1') return false;
 
+    const sectionIds=['addProductSec','ordersSec','usersSec','messageSendSec','chatsSec','couponsSec','facebookSec','settingsSec','subAdminSec','productRequestsSec','productsSec'];
     const nav=[...root.children].find(el => el.tagName==='DIV' && /Add Product/.test(el.textContent||'') && /Sell Products/.test(el.textContent||''));
-    if(nav) nav.classList.add('admin-section-nav');
+    if(nav){
+      nav.classList.add('admin-section-nav');
+      nav.querySelectorAll('a').forEach(a=>a.classList.add('admin-menu-item'));
+    }
 
-    const ids=['addProductSec','ordersSec','usersSec','messageSendSec','chatsSec','couponsSec','facebookSec','settingsSec','subAdminSec','productRequestsSec','productsSec'];
-    const headings=ids.map(id=>document.getElementById(id)).filter(Boolean);
-    headings.forEach((h,index)=>{
+    // Only direct children are used as section anchors. Each anchor and every sibling
+    // belonging to it are moved into one closed card, so controls cannot remain loose below.
+    const headings=sectionIds.map(id=>document.getElementById(id)).filter(h=>h && h.parentElement===root);
+    if(!headings.length) return false;
+
+    headings.forEach(h=>{
       if(h.closest('.admin-section-card')) return;
       const card=document.createElement('section');
       card.className='admin-section-card';
+      card.dataset.sectionId=h.id;
       const header=document.createElement('button');
       header.type='button';
       header.className='admin-section-header';
@@ -809,31 +816,36 @@ style="font-size:13px; color:#666;">Standard Delivery Charge:
       card.appendChild(header);
       card.appendChild(body);
       body.appendChild(h);
+
       let node=card.nextSibling;
       while(node){
         const next=node.nextSibling;
-        if(node.nodeType===1 && node.tagName==='H3' && ids.includes(node.id)) break;
+        if(node.nodeType===1 && node.tagName==='H3' && sectionIds.includes(node.id)) break;
         if(node.nodeType===1 && node.tagName==='HR'){ node.remove(); node=next; continue; }
         body.appendChild(node);
         node=next;
       }
+
       header.addEventListener('click',()=>{
-        const open=!body.hidden;
-        body.hidden=open;
-        header.setAttribute('aria-expanded',String(!open));
-        card.classList.toggle('open',!open);
+        const opening=body.hidden;
+        body.hidden=!opening;
+        header.setAttribute('aria-expanded',String(opening));
+        card.classList.toggle('open',opening);
         const arrow=header.querySelector('.admin-section-arrow');
-        if(arrow) arrow.textContent=open?'＋':'−';
+        if(arrow) arrow.textContent=opening?'−':'＋';
       });
     });
 
-    // Turn the old jump-links into a clean dashboard menu without changing their destinations.
-    if(nav){
-      nav.querySelectorAll('a').forEach(a=>a.classList.add('admin-menu-item'));
-    }
+    root.dataset.adminOrganized='1';
+    return true;
   }
-  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',organizeAdminDashboard);
-  else organizeAdminDashboard();
+  function boot(){
+    if(organizeAdminDashboard()) return;
+    setTimeout(organizeAdminDashboard,50);
+    setTimeout(organizeAdminDashboard,250);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot);
+  else boot();
 })();
 </script>
 <style>
@@ -1546,13 +1558,15 @@ app.get('/request-inbox', async (req,res,next)=>{
     const email=normalizeEmail(req.user.email);
     let requests=[];
     if(isMainAdmin(req.user)) requests=await ProductRequest.find({status:{$in:['accepted','closed']}}).sort({_id:-1}).limit(100).lean();
-    else if(isSubAdmin(req.user)) requests=await ProductRequest.find({acceptedByEmail:email,status:'accepted'}).sort({_id:-1}).limit(100).lean();
-    else requests=await ProductRequest.find({userEmail:email,status:'accepted'}).sort({_id:-1}).limit(100).lean();
+    else if(isSubAdmin(req.user)) requests=await ProductRequest.find({acceptedByEmail:email,status:{$in:['accepted','closed']}}).sort({_id:-1}).limit(100).lean();
+    else requests=await ProductRequest.find({userEmail:email,status:{$in:['accepted','closed']}}).sort({_id:-1}).limit(100).lean();
     let html='';
     for(const r of requests){
       const msgs=await ProductRequestChat.find({requestId:String(r._id)}).sort({_id:1}).limit(200).lean();
       const unread=await ProductRequestChat.countDocuments({requestId:String(r._id),recipientEmail:email,isRead:false});
-      const canChat=(isSubAdmin(req.user)&&normalizeEmail(r.acceptedByEmail)===email)||(req.user.role==='user'&&normalizeEmail(r.userEmail)===email)||(isSubAdmin(req.user)&&!subAdminIsActive(req.user)&&normalizeEmail(r.userEmail)===email);
+      const isAcceptedSeller = isSubAdmin(req.user) && normalizeEmail(r.acceptedByEmail)===email;
+      const isRequestCustomer = (req.user.role==='user' || (req.user.role==='subadmin' && !subAdminIsActive(req.user))) && normalizeEmail(r.userEmail)===email;
+      const canChat = (r.status==='accepted' || r.status==='closed') && (isAcceptedSeller || isRequestCustomer);
       html+=`<div style="background:#fff;border:1px solid #e5e5e5;border-radius:14px;padding:14px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.05)"><div style="display:flex;gap:12px;align-items:flex-start">${r.requestImage?`<img src="${mediaUrl(r.requestImage)}" width="72" height="72" style="object-fit:cover;border-radius:9px;cursor:pointer" onclick="openImageModal(this.src)">`:''}<div style="flex:1"><b style="color:#f85606">${r.productName}</b><div style="font-size:12px;color:#666;margin-top:3px">Customer: ${r.userName||''} | ${r.userPhone||''}</div><div style="font-size:12px;color:#666">Address: ${r.userAddress||''}</div><div style="font-size:12px;color:#555;margin-top:3px">${r.details||''}</div><div style="font-size:12px;color:#087f23;margin-top:4px"><b>Accepted by:</b> ${r.acceptedByEmail||''} ${unread?`<span style="background:#dc3545;color:#fff;border-radius:10px;padding:2px 6px;margin-left:5px">${unread} নতুন</span>`:''}</div></div></div><div style="margin-top:12px;background:#fafafa;border:1px solid #eee;border-radius:10px;padding:10px;max-height:260px;overflow:auto">${msgs.length?msgs.map(m=>`<div style="padding:7px 9px;margin:5px 0;border-radius:9px;background:${m.senderEmail===email?'#fff1e8':'#eef7ff'}"><div style="font-size:11px;color:#777">${m.senderEmail===email?'আপনি':m.senderRole==='subadmin'?'Shop Admin':'Customer'} • ${new Date(m.createdAt).toLocaleString()}</div><div style="font-size:14px;margin-top:2px">${m.message}</div></div>`).join(''):'<div style="color:#777;text-align:center;padding:15px">এখনও কোনো মেসেজ নেই।</div>'}</div>${canChat?`<form action="/request-inbox/send" method="POST" style="display:flex;gap:6px;margin-top:9px"><input type="hidden" name="requestId" value="${r._id}"><input type="text" name="message" required maxlength="3000" placeholder="মেসেজ লিখুন..." style="flex:1;padding:9px;border:1px solid #ccc;border-radius:8px"><button class="btn" style="padding:8px 12px">Send</button></form>`:''}</div>`;
       if(!isMainAdmin(req.user)) await ProductRequestChat.updateMany({requestId:String(r._id),recipientEmail:email,isRead:false},{$set:{isRead:true}});
     }
@@ -1564,14 +1578,14 @@ app.post('/request-inbox/send', async(req,res,next)=>{
   try{
     if(!req.user) return res.redirect('/login');
     const request=await ProductRequest.findById(req.body.requestId);
-    if(!request || request.status!=='accepted') return res.status(404).send('Request not available');
+    if(!request || !['accepted','closed'].includes(request.status)) return res.status(404).send('Request not available');
     const email=normalizeEmail(req.user.email);
     let allowed=false, recipient='';
     if(isSubAdmin(req.user) && normalizeEmail(request.acceptedByEmail)===email){allowed=true;recipient=normalizeEmail(request.userEmail);}
     else if(isCustomerLike(req.user) && normalizeEmail(request.userEmail)===email){allowed=true;recipient=normalizeEmail(request.acceptedByEmail);}
     if(!allowed || !recipient) return res.status(403).send('Unauthorized: Main Admin access required');
     const message=safeText(req.body.message,3000); if(!message) return res.redirect('/request-inbox');
-    await new ProductRequestChat({requestId:String(request._id),userEmail:normalizeEmail(request.userEmail),subAdminEmail:normalizeEmail(request.acceptedByEmail),senderEmail:email,senderRole:req.user.role,recipientEmail:recipient,message,productName:request.productName,requestImage:request.requestImage,userName:request.userName,userPhone:request.userPhone,userAddress:request.userAddress,isRead:false}).save();
+    await new ProductRequestChat({requestId:String(request._id),userEmail:normalizeEmail(request.userEmail),subAdminEmail:normalizeEmail(request.acceptedByEmail),senderEmail:email,senderRole:req.user.role==='subadmin'?'subadmin':'user',recipientEmail:recipient,message,productName:request.productName,requestImage:request.requestImage,userName:request.userName,userPhone:request.userPhone,userAddress:request.userAddress,isRead:false}).save();
     await createNotification(recipient,'Product Request Message',`${request.productName} সম্পর্কে নতুন message এসেছে।`,'/request-inbox','message');
     res.redirect('/request-inbox');
   }catch(e){next(e);}
