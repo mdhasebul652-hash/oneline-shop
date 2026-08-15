@@ -292,6 +292,7 @@ updatedAt: { type: Date, default: Date.now }
 const SubAdminSupport = mongoose.model('SubAdminSupport', subAdminSupportSchema);
 
 const productRequestSchema = new mongoose.Schema({
+  userId: { type: String, default: '', index: true },
   userEmail: { type: String, required: true },
   userName: { type: String, default: '' },
   userPhone: { type: String, default: '' },
@@ -309,6 +310,7 @@ const productRequestSchema = new mongoose.Schema({
 });
 const ProductRequest = mongoose.model('ProductRequest', productRequestSchema);
 const productRequestChatSchema = new mongoose.Schema({
+  userId: { type: String, default: '', index: true },
   requestId: { type: String, required: true, index: true },
   userEmail: { type: String, required: true, index: true },
   subAdminEmail: { type: String, required: true, index: true },
@@ -516,7 +518,7 @@ let relatedProducts = await Product.find({ category: product.category, _id: { $n
 product._id } }).limit(4);
 let allImages = [product.mainImage, ...((product.additionalImages || []).filter(Boolean))].filter(Boolean);
 let galleryData = allImages.map((img, idx) => ({ index: idx, raw: String(img || ''), src: mediaUrl(img) }));
-let galleryHTML = galleryData.map((item, idx) => ` <button type="button" class="thumb-btn" data-gallery-index="${idx}" aria-label="Product image ${idx+1}" style="padding:0;margin:0;border:0;background:transparent;cursor:pointer;display:block;flex:0 0 auto;pointer-events:auto;" onclick="event.preventDefault();event.stopPropagation();setMainProductImage(${idx},this.querySelector('img')); return false;"><img src="${item.src}" data-gallery-src="${item.src}" class="thumb-img" alt="Product image ${idx+1}" style="width:60px;height:60px;object-fit:cover;border-radius:4px;border:${idx === 0 ? '2px solid #f85606' : '1px solid #ccc'};cursor:pointer;display:block;pointer-events:auto;" draggable="false" onerror="this.style.opacity='0.35'"></button> `).join('');
+let galleryHTML = galleryData.map((item, idx) => ` <button type="button" class="thumb-btn" data-gallery-index="${idx}" data-gallery-src="${item.src}" aria-label="Product image ${idx+1}" aria-current="${idx===0?'true':'false'}" style="padding:0;margin:0;border:0;background:transparent;cursor:pointer;display:block;flex:0 0 auto;pointer-events:auto;touch-action:manipulation;"><img src="${item.src}" data-gallery-src="${item.src}" class="thumb-img" alt="Product image ${idx+1}" style="width:60px;height:60px;object-fit:cover;border-radius:4px;border:${idx === 0 ? '2px solid #f85606' : '1px solid #ccc'};cursor:pointer;display:block;pointer-events:none;user-select:none;" draggable="false" onerror="this.style.opacity='0.35'"></button> `).join('');
 let chatsHTML = chats.map(c => {
   const img = mediaUrl(c.productImage);
   const from = c.senderRole === 'admin' || c.senderRole === 'subadmin' ? 'Admin' : c.userEmail;
@@ -541,12 +543,19 @@ function setMainProductImage(index, element) {
   const item = galleryImages[Number(index)];
   const main = document.getElementById('mainProductImg');
   if (!item || !main) return false;
-  const src = item.src || resolveGalleryUrl(item.raw || '');
+  const src = String(item.src || resolveGalleryUrl(item.raw || '')).trim();
   if (!src) return false;
   selectedImage = item.raw || src;
-  main.setAttribute('src', src);
-  document.querySelectorAll('.thumb-img').forEach(t => t.style.border = '1px solid #ccc');
-  if (element) element.style.border = '2px solid #f85606';
+  main.src = src;
+  main.setAttribute('data-selected-image', selectedImage);
+  document.querySelectorAll('.thumb-img').forEach(t => { t.style.border = '1px solid #ccc'; });
+  document.querySelectorAll('.thumb-btn').forEach(t => t.setAttribute('aria-current','false'));
+  const thumb = element || document.querySelector('.thumb-btn[data-gallery-index="' + Number(index) + '"] .thumb-img');
+  if (thumb) {
+    thumb.style.border = '2px solid #f85606';
+    const wrapper = thumb.closest('.thumb-btn');
+    if (wrapper) wrapper.setAttribute('aria-current','true');
+  }
   updateOrderLinks();
   return false;
 }
@@ -590,21 +599,38 @@ function updateOrderLinks() {
 function bindProductControls() {
   refreshQtyUI();
   updateOrderLinks();
-  document.querySelectorAll('.thumb-btn').forEach(btn => {
-    btn.addEventListener('click', function(ev) {
+}
+function installProductInteractionDelegation() {
+  if (window.__productInteractionDelegationInstalled) return;
+  window.__productInteractionDelegationInstalled = true;
+  document.addEventListener('click', function(ev) {
+    const thumb = ev.target && ev.target.closest ? ev.target.closest('.thumb-btn') : null;
+    if (thumb) {
       ev.preventDefault();
       ev.stopPropagation();
-      const idx = Number(this.getAttribute('data-gallery-index'));
-      const img = this.querySelector('.thumb-img');
+      const idx = Number(thumb.getAttribute('data-gallery-index'));
+      const img = thumb.querySelector('.thumb-img');
       setMainProductImage(idx, img);
-    }, { passive: false });
-  });
-  const minusBtn = document.getElementById('qtyMinusBtn');
-  const plusBtn = document.getElementById('qtyPlusBtn');
-  if (minusBtn) minusBtn.addEventListener('click', function(ev) { ev.preventDefault(); ev.stopPropagation(); decrementQty(); }, { passive:false });
-  if (plusBtn) plusBtn.addEventListener('click', function(ev) { ev.preventDefault(); ev.stopPropagation(); incrementQty(); }, { passive:false });
+      return;
+    }
+    const plus = ev.target && ev.target.closest ? ev.target.closest('#qtyPlusBtn') : null;
+    if (plus) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (!plus.disabled) incrementQty();
+      return;
+    }
+    const minus = ev.target && ev.target.closest ? ev.target.closest('#qtyMinusBtn') : null;
+    if (minus) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (!minus.disabled) decrementQty();
+    }
+  }, true);
 }
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindProductControls); else bindProductControls();
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ bindProductControls(); installProductInteractionDelegation(); }); else { bindProductControls(); installProductInteractionDelegation(); }
+setTimeout(installProductInteractionDelegation, 50);
+setTimeout(installProductInteractionDelegation, 300);
 </script> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ratings & Reviews</h3> <form action="/api/add-review" method="POST" style="background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:15px;"> <input type="hidden" name="productId" value="${product._id}"> <label style="font-size:13px; font-weight:600;">Rate this product:</label> <select name="rating" style="padding:5px; margin-bottom:8px; border-radius:4px; border:1px solid #ccc;" required> <option value="5">★★★★★ (5 Stars)</option> <option value="4">★★★★☆ (4 Stars)</option> <option value="3">★★★☆☆ (3 Stars)</option> <option value="2">★★☆☆☆ (2 Stars)</option> <option value="1">★☆☆☆☆ (1 Star)</option> </select><br> <textarea name="comment" placeholder="Write your review here..." style="width:100%; height:50px; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required></textarea> <button type="submit" class="btn" style="padding:6px 12px; font-size:12px; margin-top:5px;">Submit Review</button> </form> <div>${reviewsHTML.length ? reviewsHTML : '<p style="color:#777; font-size:13px;">No reviews yet.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>You May Also Like</h3> <div class="product-grid" style="margin-top:10px;">${relatedHTML.length ? relatedHTML : '<p>No related products.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ask Question About This Product</h3> <form action="/api/chat" method="POST"> <input type="hidden" name="productId" value="${product._id}"> <input type="hidden" name="productName" value="${product.name}"> <input type="hidden" name="productImage" value="${product.mainImage}"> <textarea name="message" placeholder="Ask your question here..." style="width:100%; height:70px; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea><br> <button type="submit" class="btn" style="margin-top:6px; padding:8px 14px;">Send Question</button> </form> <div style="margin-top:20px;"> <h4 style="margin-bottom:10px;">Customer Q&A (পণ্যের বিষয়ে আপনার ও এডমিনের কথোপকথন):</h4> ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions yet.</p>'} </div> </div> </body> </html> `);
 } catch (err) {
 next(err);
@@ -1130,7 +1156,7 @@ app.post('/api/product-request', upload.single('requestImage'), async (req,res,n
         fs.writeFileSync(path.join(uploadDir, requestImage), req.file.buffer);
       }
     }
-    await new ProductRequest({ userEmail:req.user.email, userName, userPhone, userAddress, productName, details, requestImage }).save();
+    await new ProductRequest({ userId:String(req.user._id || ''), userEmail:normalizeEmail(req.user.email), userName, userPhone, userAddress, productName, details, requestImage }).save();
     await User.findByIdAndUpdate(req.user._id,{name:userName,phone:userPhone,address:userAddress});
     res.send(`<script>alert('আপনার পণ্যের অনুরোধ Main Admin-এর কাছে পাঠানো হয়েছে।');window.location.href='/dashboard';</script>`);
   } catch(e){ next(e); }
@@ -1578,7 +1604,11 @@ app.get('/request-inbox', async (req,res,next)=>{
       const msgs=await ProductRequestChat.find({requestId:String(r._id)}).sort({_id:1}).limit(200).lean();
       const unread=await ProductRequestChat.countDocuments({requestId:String(r._id),recipientEmail:email,isRead:false});
       const isAcceptedSeller = isSubAdmin(req.user) && normalizeEmail(r.acceptedByEmail)===email;
-      const isRequestCustomer = (req.user.role==='user' || (req.user.role==='subadmin' && !subAdminIsActive(req.user))) && normalizeEmail(r.userEmail)===email;
+      const currentUserId = String(req.user._id || '');
+      const currentPhone = String(req.user.phone || '').replace(/\D/g,'');
+      const requestPhone = String(r.userPhone || '').replace(/\D/g,'');
+      const samePhoneAndName = !!currentPhone && !!requestPhone && currentPhone === requestPhone && String(req.user.name || '').trim().toLowerCase() === String(r.userName || '').trim().toLowerCase();
+      const isRequestCustomer = (req.user.role==='user' || (req.user.role==='subadmin' && !subAdminIsActive(req.user))) && (String(r.userId || '') === currentUserId || normalizeEmail(r.userEmail)===email || samePhoneAndName);
       const canChat = (r.status==='accepted' || r.status==='closed') && (isAcceptedSeller || isRequestCustomer);
       html+=`<div style="background:#fff;border:1px solid #e5e5e5;border-radius:14px;padding:14px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.05)"><div style="display:flex;gap:12px;align-items:flex-start">${r.requestImage?`<img src="${mediaUrl(r.requestImage)}" width="72" height="72" style="object-fit:cover;border-radius:9px;cursor:pointer" onclick="openImageModal(this.src)">`:''}<div style="flex:1"><b style="color:#f85606">${r.productName}</b><div style="font-size:12px;color:#666;margin-top:3px">Customer: ${r.userName||''} | ${r.userPhone||''}</div><div style="font-size:12px;color:#666">Address: ${r.userAddress||''}</div><div style="font-size:12px;color:#555;margin-top:3px">${r.details||''}</div><div style="font-size:12px;color:#087f23;margin-top:4px"><b>Accepted by:</b> ${r.acceptedByEmail||''} ${unread?`<span style="background:#dc3545;color:#fff;border-radius:10px;padding:2px 6px;margin-left:5px">${unread} নতুন</span>`:''}</div></div></div><div style="margin-top:12px;background:#fafafa;border:1px solid #eee;border-radius:10px;padding:10px;max-height:260px;overflow:auto">${msgs.length?msgs.map(m=>`<div style="padding:7px 9px;margin:5px 0;border-radius:9px;background:${m.senderEmail===email?'#fff1e8':'#eef7ff'}"><div style="font-size:11px;color:#777">${m.senderEmail===email?'আপনি':m.senderRole==='subadmin'?'Shop Admin':'Customer'} • ${new Date(m.createdAt).toLocaleString()}</div><div style="font-size:14px;margin-top:2px">${m.message}</div></div>`).join(''):'<div style="color:#777;text-align:center;padding:15px">এখনও কোনো মেসেজ নেই।</div>'}</div>${canChat?`<form action="/request-inbox/send" method="POST" style="display:flex;gap:6px;margin-top:9px"><input type="hidden" name="requestId" value="${r._id}"><input type="text" name="message" required maxlength="3000" placeholder="মেসেজ লিখুন..." style="flex:1;padding:9px;border:1px solid #ccc;border-radius:8px"><button class="btn" style="padding:8px 12px">Send</button></form>`:''}</div>`;
       if(!isMainAdmin(req.user)) await ProductRequestChat.updateMany({requestId:String(r._id),recipientEmail:email,isRead:false},{$set:{isRead:true}});
@@ -1595,10 +1625,10 @@ app.post('/request-inbox/send', async(req,res,next)=>{
     const email=normalizeEmail(req.user.email);
     let allowed=false, recipient='';
     if(isSubAdmin(req.user) && normalizeEmail(request.acceptedByEmail)===email){allowed=true;recipient=normalizeEmail(request.userEmail);}
-    else if(isCustomerLike(req.user) && normalizeEmail(request.userEmail)===email){allowed=true;recipient=normalizeEmail(request.acceptedByEmail);}
+    else if(isCustomerLike(req.user) && (String(request.userId || '') === String(req.user._id || '') || normalizeEmail(request.userEmail)===email || (String(req.user.phone || '').replace(/\D/g,'') && String(request.userPhone || '').replace(/\D/g,'') === String(req.user.phone || '').replace(/\D/g,'') && String(req.user.name || '').trim().toLowerCase() === String(request.userName || '').trim().toLowerCase()))){allowed=true;recipient=normalizeEmail(request.acceptedByEmail);}
     if(!allowed || !recipient) return res.status(403).send('Unauthorized: Main Admin access required');
     const message=safeText(req.body.message,3000); if(!message) return res.redirect('/request-inbox');
-    await new ProductRequestChat({requestId:String(request._id),userEmail:normalizeEmail(request.userEmail),subAdminEmail:normalizeEmail(request.acceptedByEmail),senderEmail:email,senderRole:req.user.role==='subadmin'?'subadmin':'user',recipientEmail:recipient,message,productName:request.productName,requestImage:request.requestImage,userName:request.userName,userPhone:request.userPhone,userAddress:request.userAddress,isRead:false}).save();
+    await new ProductRequestChat({requestId:String(request._id),userId:String(request.userId || ''),userEmail:normalizeEmail(request.userEmail),subAdminEmail:normalizeEmail(request.acceptedByEmail),senderEmail:email,senderRole:req.user.role==='subadmin'?'subadmin':'user',recipientEmail:recipient,message,productName:request.productName,requestImage:request.requestImage,userName:request.userName,userPhone:request.userPhone,userAddress:request.userAddress,isRead:false}).save();
     await createNotification(recipient,'Product Request Message',`${request.productName} সম্পর্কে নতুন message এসেছে।`,'/request-inbox','message');
     res.redirect('/request-inbox');
   }catch(e){next(e);}
@@ -1638,7 +1668,7 @@ app.post('/subadmin/product-request/accept/:id', async (req,res,next)=>{
       {new:true}
     );
     if (!accepted) return res.send(`<script>alert('এই request ইতিমধ্যে অন্য Sub Admin Accept করেছে অথবা আর available নেই।');window.location.href='/admin-dashboard#productRequestsSec';</script>`);
-    await new ProductRequestChat({requestId:String(accepted._id),userEmail:normalizeEmail(accepted.userEmail),subAdminEmail:normalizeEmail(req.user.email),senderEmail:normalizeEmail(req.user.email),senderRole:'subadmin',recipientEmail:normalizeEmail(accepted.userEmail),message:`আপনার product request আমি Accept করেছি। এখন আপনি এখান থেকে আমার সাথে সরাসরি যোগাযোগ করতে পারবেন।`,productName:accepted.productName,requestImage:accepted.requestImage,userName:accepted.userName,userPhone:accepted.userPhone,userAddress:accepted.userAddress,isRead:false}).save();
+    await new ProductRequestChat({requestId:String(accepted._id),userId:String(accepted.userId || ''),userEmail:normalizeEmail(accepted.userEmail),subAdminEmail:normalizeEmail(req.user.email),senderEmail:normalizeEmail(req.user.email),senderRole:'subadmin',recipientEmail:normalizeEmail(accepted.userEmail),message:`আপনার product request আমি Accept করেছি। এখন আপনি এখান থেকে আমার সাথে সরাসরি যোগাযোগ করতে পারবেন।`,productName:accepted.productName,requestImage:accepted.requestImage,userName:accepted.userName,userPhone:accepted.userPhone,userAddress:accepted.userAddress,isRead:false}).save();
     res.send(`<script>alert('Request সফলভাবে Accept করেছেন। Customer-এর সাথে Private Inbox Chat এখন চালু হয়েছে।');window.location.href='/request-inbox';</script>`);
   } catch(e){next(e);}
 });
