@@ -518,7 +518,7 @@ let relatedProducts = await Product.find({ category: product.category, _id: { $n
 product._id } }).limit(4);
 let allImages = [product.mainImage, ...((product.additionalImages || []).filter(Boolean))].filter(Boolean);
 let galleryData = allImages.map((img, idx) => ({ index: idx, raw: String(img || ''), src: mediaUrl(img) }));
-let galleryHTML = galleryData.map((item, idx) => ` <button type="button" class="thumb-btn" data-gallery-index="${idx}" data-gallery-src="${item.src}" aria-label="Product image ${idx+1}" aria-current="${idx===0?'true':'false'}" style="padding:0;margin:0;border:0;background:transparent;cursor:pointer;display:block;flex:0 0 auto;pointer-events:auto;touch-action:manipulation;"><img src="${item.src}" data-gallery-src="${item.src}" class="thumb-img" alt="Product image ${idx+1}" style="width:60px;height:60px;object-fit:cover;border-radius:4px;border:${idx === 0 ? '2px solid #f85606' : '1px solid #ccc'};cursor:pointer;display:block;pointer-events:none;user-select:none;" draggable="false" onerror="this.style.opacity='0.35'"></button> `).join('');
+let galleryHTML = galleryData.map((item, idx) => ` <button type="button" class="thumb-btn" data-gallery-index="${idx}" aria-label="Product image ${idx+1}" aria-current="${idx===0?'true':'false'}" data-gallery-index="${idx}" style="padding:0;margin:0;border:0;background:transparent;cursor:pointer;display:block;flex:0 0 auto;pointer-events:auto;touch-action:manipulation;position:relative;z-index:20;"><img src="${item.src}" class="thumb-img" alt="Product image ${idx+1}" style="width:60px;height:60px;object-fit:cover;border-radius:4px;border:${idx === 0 ? '2px solid #f85606' : '1px solid #ccc'};cursor:pointer;display:block;pointer-events:auto;user-select:none;" draggable="false" onerror="this.style.opacity='0.35'"></button> `).join('');
 let chatsHTML = chats.map(c => {
   const img = mediaUrl(c.productImage);
   const from = c.senderRole === 'admin' || c.senderRole === 'subadmin' ? 'Admin' : c.userEmail;
@@ -535,102 +535,95 @@ let relatedHTML = relatedProducts.map(p => ` <div class="product-card" onclick="
 res.send(` <!DOCTYPE html> <html> <head><title>${product.name}</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="background:white; padding:15px; border-radius:6px;"> <div style="display:flex; gap:20px; flex-wrap:wrap;"> <div style="width:100%; max-width:320px; margin:0 auto;"> <img id="mainProductImg" src="${mediaUrl(product.mainImage)}" style="width:100%; height:300px; object-fit:cover; border-radius:6px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(this.src)"><br> <div style="display:flex; gap:8px; margin-top:10px; overflow-x:auto;">${galleryHTML}</div> </div> <div style="flex:1; min-width: 260px;"> <h2 style="font-size:18px; margin-top:0;">${product.name}</h2> <p style="font-size:13px; color:#666;"><b>Category:</b> ${product.category}</p> <div class="price">৳${product.price}</div> ${isCustomerLike(req.user) ? `<form action="/wishlist/toggle/${product._id}" method="POST" style="margin:8px 0;"><button type="submit" class="btn" style="background:#e91e63;color:#fff;padding:7px 12px;">❤️ ${Array.isArray(req.user.wishlist) && req.user.wishlist.map(String).includes(String(product._id)) ? 'Remove from Wishlist' : 'Add to Wishlist'}</button></form>` : ''} <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock}</p> <p style="font-size:13px; color:#d9534f;"><b>Maximum Order Limit:</b> ${product.maxOrderLimit || 5}</p> <p style="font-size:13px; color:#007bff;"><b>Delivery Charge:</b> ৳${product.deliveryCharge || 150}</p> <p style="font-size:14px; color:#440;">${product.description}</p> <br> <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;"> <span style="font-weight:600; font-size:13px;">Quantity:</span> <button id="qtyMinusBtn" type="button" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; border:none; border-radius:4px; cursor:pointer;">-</button> <span id="qtyDisplay" style="font-size:16px; font-weight:bold; min-width:25px; text-align:center;">1</span> <button id="qtyPlusBtn" type="button" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; border:none; border-radius:4px; cursor:pointer;">+</button> </div> <div style="display: flex; gap: 10px; flex-wrap:wrap;"> <a id="buyNowBtn" href="/buy-now/${product._id}?qty=1&selectedImage=${encodeURIComponent(String(product.mainImage || ''))}" class="btn btn-buy" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center;">Buy Now</a> <a id="addToCartBtn" href="/api/add-to-cart/${product._id}?qty=1&selectedImage=${encodeURIComponent(String(product.mainImage || ''))}" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#28a745;">🛒Add to Cart</a> ${getProductWhatsAppUrl(product) ? `<a href="${getProductWhatsAppUrl(product)}" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#25D366; color:#fff; text-decoration:none;">💬 WhatsApp-এ কথা বলুন</a>` : ''} </div> </div> </div> <script>
 const galleryImages = ${JSON.stringify(galleryData)};
 let currentQty = 1;
-const productMaxLimit = Number(${Number(product.maxOrderLimit || 5)}) || 5;
-const productStock = Number(${Number(product.stock ?? 0)}) || 0;
-const allowedMax = Math.max(0, Math.min(productMaxLimit, productStock));
-let selectedImage = galleryImages.length ? (galleryImages[0].raw || galleryImages[0].src || '') : '';
-function setMainProductImage(index, element) {
+const productMaxLimit = Math.max(1, Number(${Number(product.maxOrderLimit || 5)}) || 5);
+const productStock = Math.max(0, Number(${Number(product.stock ?? 0)}) || 0);
+const allowedMax = Math.min(productMaxLimit, productStock > 0 ? productStock : productMaxLimit);
+let selectedImage = galleryImages.length ? String(galleryImages[0].raw || galleryImages[0].src || '') : '';
+function resolveGalleryUrl(value) {
+  const v = String(value || '').trim();
+  if (!v) return '';
+  if (/^(https?:)?\/\//i.test(v) || v.startsWith('data:') || v.startsWith('blob:')) return v;
+  return '/uploads/' + v.replace(/\\/g,'/').replace(/^\/+/, '').replace(/^uploads\//i, '');
+}
+function updateOrderLinks() {
+  const buyBtn = document.getElementById('buyNowBtn');
+  const cartBtn = document.getElementById('addToCartBtn');
+  const productId = ${JSON.stringify(String(product._id))};
+  const encodedImage = encodeURIComponent(selectedImage || '');
+  if (buyBtn) buyBtn.href = '/buy-now/' + productId + '?qty=' + Math.max(1,currentQty) + '&selectedImage=' + encodedImage;
+  if (cartBtn) cartBtn.href = '/api/add-to-cart/' + productId + '?qty=' + Math.max(1,currentQty) + '&selectedImage=' + encodedImage;
+}
+function refreshQtyUI() {
+  if (currentQty < 1) currentQty = 1;
+  if (allowedMax > 0 && currentQty > allowedMax) currentQty = allowedMax;
+  const display = document.getElementById('qtyDisplay');
+  const minus = document.getElementById('qtyMinusBtn');
+  const plus = document.getElementById('qtyPlusBtn');
+  if (display) display.textContent = String(currentQty);
+  if (minus) { minus.disabled = currentQty <= 1; minus.style.opacity = currentQty <= 1 ? '0.5' : '1'; minus.style.pointerEvents = 'auto'; }
+  if (plus) { plus.disabled = currentQty >= allowedMax; plus.style.opacity = currentQty >= allowedMax ? '0.5' : '1'; plus.style.pointerEvents = 'auto'; }
+  updateOrderLinks();
+}
+function incrementQty() {
+  if (currentQty < allowedMax) { currentQty += 1; refreshQtyUI(); }
+  return false;
+}
+function decrementQty() {
+  if (currentQty > 1) { currentQty -= 1; refreshQtyUI(); }
+  return false;
+}
+function setMainProductImage(index) {
   const item = galleryImages[Number(index)];
   const main = document.getElementById('mainProductImg');
   if (!item || !main) return false;
   const src = String(item.src || resolveGalleryUrl(item.raw || '')).trim();
   if (!src) return false;
-  selectedImage = item.raw || src;
+  selectedImage = String(item.raw || item.src || '');
   main.src = src;
   main.setAttribute('data-selected-image', selectedImage);
   document.querySelectorAll('.thumb-img').forEach(t => { t.style.border = '1px solid #ccc'; });
   document.querySelectorAll('.thumb-btn').forEach(t => t.setAttribute('aria-current','false'));
-  const thumb = element || document.querySelector('.thumb-btn[data-gallery-index="' + Number(index) + '"] .thumb-img');
+  const thumb = document.querySelector('.thumb-btn[data-gallery-index="' + Number(index) + '"]');
   if (thumb) {
-    thumb.style.border = '2px solid #f85606';
-    const wrapper = thumb.closest('.thumb-btn');
-    if (wrapper) wrapper.setAttribute('aria-current','true');
+    const image = thumb.querySelector('.thumb-img');
+    if (image) image.style.border = '2px solid #f85606';
+    thumb.setAttribute('aria-current','true');
   }
   updateOrderLinks();
   return false;
 }
-window.setMainProductImage = setMainProductImage;
-function resolveGalleryUrl(value) {
-  const v = String(value || '').trim();
-  if (!v) return '';
-  if (/^https?:\/\//i.test(v) || v.startsWith('//') || v.startsWith('data:')) return v;
-  return '/uploads/' + v.replace(/\\/g,'/').replace(/^\/+/, '').replace(/^uploads\//i, '');
-}
-function refreshQtyUI() {
-  const display = document.getElementById('qtyDisplay');
-  if (display) display.textContent = String(currentQty);
-  const minus = document.getElementById('qtyMinusBtn');
-  const plus = document.getElementById('qtyPlusBtn');
-  if (minus) { minus.disabled = currentQty <= 1; minus.style.opacity = currentQty <= 1 ? '.5' : '1'; }
-  if (plus) { plus.disabled = allowedMax <= 1 || currentQty >= allowedMax; plus.style.opacity = (allowedMax <= 1 || currentQty >= allowedMax) ? '.5' : '1'; }
-  if (allowedMax === 0) { currentQty = 0; if (display) display.textContent = '0'; }
-}
-function incrementQty() {
-  if (allowedMax > 0 && currentQty < allowedMax) { currentQty += 1; refreshQtyUI(); updateOrderLinks(); }
-}
-function decrementQty() {
-  if (currentQty > 1) { currentQty -= 1; refreshQtyUI(); updateOrderLinks(); }
-}
 window.incrementQty = incrementQty;
 window.decrementQty = decrementQty;
-function updateOrderLinks() {
-  if (allowedMax <= 0) {
-    const buyBtn = document.getElementById('buyNowBtn'); const cartBtn = document.getElementById('addToCartBtn');
-    [buyBtn, cartBtn].forEach(btn => { if (btn) { btn.style.pointerEvents='none'; btn.style.opacity='.5'; } });
+window.setMainProductImage = setMainProductImage;
+function initProductControls() {
+  refreshQtyUI();
+  if (galleryImages.length) setMainProductImage(0);
+}
+document.addEventListener('click', function(event) {
+  const thumb = event.target.closest && event.target.closest('.thumb-btn');
+  if (thumb) {
+    event.preventDefault();
+    event.stopPropagation();
+    setMainProductImage(Number(thumb.getAttribute('data-gallery-index')));
     return;
   }
-  const encodedImage = encodeURIComponent(selectedImage || '');
-  const productId = ${JSON.stringify(String(product._id))};
-  const buyBtn = document.getElementById('buyNowBtn');
-  const cartBtn = document.getElementById('addToCartBtn');
-  if (buyBtn) buyBtn.href = '/buy-now/' + productId + '?qty=' + currentQty + '&selectedImage=' + encodedImage;
-  if (cartBtn) cartBtn.href = '/api/add-to-cart/' + productId + '?qty=' + currentQty + '&selectedImage=' + encodedImage;
-}
-function bindProductControls() {
-  refreshQtyUI();
-  updateOrderLinks();
-}
-function installProductInteractionDelegation() {
-  if (window.__productInteractionDelegationInstalled) return;
-  window.__productInteractionDelegationInstalled = true;
-  document.addEventListener('click', function(ev) {
-    const thumb = ev.target && ev.target.closest ? ev.target.closest('.thumb-btn') : null;
-    if (thumb) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      const idx = Number(thumb.getAttribute('data-gallery-index'));
-      const img = thumb.querySelector('.thumb-img');
-      setMainProductImage(idx, img);
-      return;
-    }
-    const plus = ev.target && ev.target.closest ? ev.target.closest('#qtyPlusBtn') : null;
-    if (plus) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      if (!plus.disabled) incrementQty();
-      return;
-    }
-    const minus = ev.target && ev.target.closest ? ev.target.closest('#qtyMinusBtn') : null;
-    if (minus) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      if (!minus.disabled) decrementQty();
-    }
-  }, true);
-}
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ bindProductControls(); installProductInteractionDelegation(); }); else { bindProductControls(); installProductInteractionDelegation(); }
-setTimeout(installProductInteractionDelegation, 50);
-setTimeout(installProductInteractionDelegation, 300);
+  const plus = event.target.closest && event.target.closest('#qtyPlusBtn');
+  if (plus) {
+    event.preventDefault();
+    event.stopPropagation();
+    incrementQty();
+    return;
+  }
+  const minus = event.target.closest && event.target.closest('#qtyMinusBtn');
+  if (minus) {
+    event.preventDefault();
+    event.stopPropagation();
+    decrementQty();
+    return;
+  }
+}, true);
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initProductControls);
+else initProductControls();
 </script> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ratings & Reviews</h3> <form action="/api/add-review" method="POST" style="background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:15px;"> <input type="hidden" name="productId" value="${product._id}"> <label style="font-size:13px; font-weight:600;">Rate this product:</label> <select name="rating" style="padding:5px; margin-bottom:8px; border-radius:4px; border:1px solid #ccc;" required> <option value="5">★★★★★ (5 Stars)</option> <option value="4">★★★★☆ (4 Stars)</option> <option value="3">★★★☆☆ (3 Stars)</option> <option value="2">★★☆☆☆ (2 Stars)</option> <option value="1">★☆☆☆☆ (1 Star)</option> </select><br> <textarea name="comment" placeholder="Write your review here..." style="width:100%; height:50px; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required></textarea> <button type="submit" class="btn" style="padding:6px 12px; font-size:12px; margin-top:5px;">Submit Review</button> </form> <div>${reviewsHTML.length ? reviewsHTML : '<p style="color:#777; font-size:13px;">No reviews yet.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>You May Also Like</h3> <div class="product-grid" style="margin-top:10px;">${relatedHTML.length ? relatedHTML : '<p>No related products.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ask Question About This Product</h3> <form action="/api/chat" method="POST"> <input type="hidden" name="productId" value="${product._id}"> <input type="hidden" name="productName" value="${product.name}"> <input type="hidden" name="productImage" value="${product.mainImage}"> <textarea name="message" placeholder="Ask your question here..." style="width:100%; height:70px; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea><br> <button type="submit" class="btn" style="margin-top:6px; padding:8px 14px;">Send Question</button> </form> <div style="margin-top:20px;"> <h4 style="margin-bottom:10px;">Customer Q&A (পণ্যের বিষয়ে আপনার ও এডমিনের কথোপকথন):</h4> ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions yet.</p>'} </div> </div> </body> </html> `);
 } catch (err) {
 next(err);
