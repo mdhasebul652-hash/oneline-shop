@@ -967,6 +967,7 @@ style="font-size:13px; color:#666;">Standard Delivery Charge:
     if(nav){
       nav.classList.add('admin-section-nav');
       nav.querySelectorAll('a').forEach(a=>a.classList.add('admin-menu-item'));
+      if(!nav.querySelector('a[href="#staffBox"]')){ const a=document.createElement('a'); a.href='#staffBox'; a.className='admin-menu-item'; a.textContent='👷 Employee Management'; nav.appendChild(a); }
     }
 
     // Only direct children are used as section anchors. Each anchor and every sibling
@@ -1024,6 +1025,7 @@ style="font-size:13px; color:#666;">Standard Delivery Charge:
 })();
 </script>
 ${(isMainAdmin(req.user)||isSubAdmin(req.user)) ? `<details class="admin-section-box" id="staffBox"><summary>👷 Employee / Staff Section Control</summary><div class="admin-section-body"><h3>👷 Employee / Staff Section Control</h3><p style="font-size:12px;color:#666">আপনার নিয়ন্ত্রণাধীন section-এর কাজ একজন employee-কে দিন। Employee শুধু assigned section-ই দেখতে ও ব্যবহার করতে পারবে।</p><form action="/admin/staff/create" method="POST" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:10px;display:grid;gap:7px;"><input name="name" placeholder="Employee Name" required><input name="email" type="email" placeholder="Employee Email" required><input name="password" type="password" minlength="6" placeholder="Temporary Password" required><label style="font-size:12px;font-weight:700">Assign Section(s)</label><div class="admin-permission-list">${(isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[])).map(k=>`<label><input type="checkbox" name="sections" value="${k}"> ${k}</label>`).join('')}</div><button class="btn" style="background:#28a745">➕ Create Employee Account</button></form><div style="margin-top:12px"><b style="font-size:13px">Your Employees</b>${(await User.find({role:'staff',staffParentAdminId:String(req.user._id)}).sort({_id:-1}).lean()).map(st=>`<details style="margin-top:7px;border:1px solid #ddd;border-radius:8px;padding:7px"><summary>${st.name||st.email} — ${st.email}</summary><div style="font-size:12px;color:#666;margin:6px 0">Assigned: ${(st.staffAssignedSections||[]).join(', ')||'None'}</div><form action="/admin/staff/permissions/${st._id}" method="POST" style="background:#f8fafc;padding:7px;border-radius:7px"><div class="admin-permission-list">${(isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[])).map(k=>`<label><input type="checkbox" name="sections" value="${k}" ${(st.staffAssignedSections||[]).includes(k)?'checked':''}> ${k}</label>`).join('')}</div><button class="btn" style="margin-top:6px;padding:5px 9px">💾 Save Employee Access</button></form></details>`).join('')||'<div style="color:#777;font-size:12px;margin-top:6px">কোনো employee নেই।</div>'}</div></div></details><hr style="margin:20px 0;">` : ''}<style>
+.admin-section-box#staffBox{display:block;margin:16px 0!important;border:1px solid #e2e8f0!important;border-radius:16px!important;background:#fff!important;overflow:hidden!important;box-shadow:0 4px 18px rgba(15,23,42,.06)!important}.admin-section-box#staffBox>summary{padding:15px 16px!important;background:linear-gradient(135deg,#fff7f0,#fff)!important;font-weight:800!important;cursor:pointer!important}.admin-section-box#staffBox[open]>summary{background:#fff4ec!important;color:#d94801!important}.admin-section-box#staffBox .admin-section-body{padding:14px!important}
 .admin-section-nav{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px!important;padding:12px!important;background:#f7f9fc;border:1px solid #e2e8f0;border-radius:16px!important;box-shadow:0 4px 16px rgba(0,0,0,.05);position:sticky;top:62px;z-index:20}
 .admin-menu-item{margin:0!important;width:100%;min-height:58px;display:flex!important;align-items:center;justify-content:center;line-height:1.2;border-radius:12px!important;box-shadow:0 2px 7px rgba(0,0,0,.06);font-size:12px!important;padding:9px 8px!important}
 .admin-section-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;margin:16px 0;overflow:hidden;box-shadow:0 4px 18px rgba(15,23,42,.06);scroll-margin-top:145px}
@@ -1811,6 +1813,19 @@ app.post('/admin/staff/permissions/:id', async(req,res,next)=>{ try {
   st.staffAssignedSections=sections; st.staffPwaSection=sections[0]; await st.save(); res.redirect('/admin-dashboard#staffBox');
  }catch(e){next(e);} });
 
+
+// ================= V46 EMPLOYEE MANAGEMENT UI =================
+function v46Esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+app.get('/admin/employee-activity', async(req,res,next)=>{
+  try{
+    if(!req.user || !canManageStaffData(req.user)) return res.status(403).send('Unauthorized');
+    const filter=isMainAdmin(req.user)?{}:{'actor.userId':String(req.user._id)};
+    const logs=await mongoose.connection.db.collection('employee_activity_logs').find(filter).sort({createdAt:-1}).limit(300).toArray();
+    const rows=logs.map(x=>`<tr><td>${v46Esc(x.actor?.name||x.actor?.userId||'Unknown')}</td><td>${v46Esc(x.actor?.role||'')}</td><td>${v46Esc(x.action||'')}</td><td>${v46Esc(x.details?.productName||x.details?.productId||'')}</td><td>${x.createdAt?new Date(x.createdAt).toLocaleString():''}</td></tr>`).join('');
+    res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Employee Accountability</title>${globalHeaderHTML}</head><body>${getNavbarHTML(req.user)}<main class="container" style="max-width:1100px"><section style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;box-shadow:0 5px 18px rgba(0,0,0,.06)"><div style="padding:16px;background:linear-gradient(135deg,#fff7f0,#fff);font-weight:800;font-size:18px">👷 Employee Accountability & Activity</div><div style="padding:12px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:8px;border-bottom:1px solid #ddd">Employee</th><th style="text-align:left;padding:8px;border-bottom:1px solid #ddd">Role</th><th style="text-align:left;padding:8px;border-bottom:1px solid #ddd">Action</th><th style="text-align:left;padding:8px;border-bottom:1px solid #ddd">Product/Item</th><th style="text-align:left;padding:8px;border-bottom:1px solid #ddd">Time</th></tr></thead><tbody>${rows||'<tr><td colspan="5" style="padding:20px;text-align:center;color:#777">No activity recorded yet.</td></tr>'}</tbody></table></div><div style="padding:12px"><a class="btn" href="/admin-dashboard#staffBox">← Back to Employee Management</a></div></section></main></body></html>`);
+  }catch(e){next(e);}
+});
+
 // ================= Main Admin Sub Admin Control Routes =================
 app.post('/sub-admin/support', async (req,res,next)=>{ try { if(!isSubAdmin(req.user)) return res.redirect('/login'); const message=String(req.body.message||'').trim(); const requestedWhatsApp=String(req.body.requestedWhatsApp||'').trim(); if(!message) return res.redirect('/admin-dashboard'); if(requestedWhatsApp && !isValidWhatsAppContact(requestedWhatsApp)) return res.send(`<script>alert('সঠিক WhatsApp Number / wa.me Link দিন।');window.history.back();</script>`); await new SubAdminSupport({subAdminId:String(req.user._id),subAdminEmail:req.user.email,message,requestedWhatsApp,whatsappUpdateStatus:requestedWhatsApp?'pending':'none'}).save(); res.redirect('/admin-dashboard'); } catch(e){next(e);} });
 app.post('/admin/subadmin/update-whatsapp/:id', async (req,res,next)=>{ try { if(!isMainAdmin(req.user)) return res.status(403).send('Unauthorized: Main Admin access required'); const whatsapp=String(req.body.whatsapp||'').trim(); if(!isValidWhatsAppContact(whatsapp)) return res.status(400).send('Invalid WhatsApp number or wa.me link'); const sa=await User.findOne({_id:req.params.id,role:'subadmin'}); if(!sa) return res.status(404).send('Sub Admin not found'); sa.subAdminWhatsApp=whatsapp; await sa.save(); await SubAdminSupport.updateMany({subAdminId:String(sa._id),requestedWhatsApp:whatsapp,whatsappUpdateStatus:'pending'},{$set:{whatsappUpdateStatus:'approved',updatedAt:new Date()}}); res.redirect('/admin-dashboard#subAdminSec'); } catch(e){next(e);} });
@@ -2031,6 +2046,7 @@ additionalImages: additionalImageFilenames,
 whatsappContact: productWhatsApp,
 ownerId: dataOwnerId(req.user)
 }).save();
+await v45WriteAuditLog(req,'PRODUCT_CREATED',{productName:String(req.body.name||''),productId:'created'});
 res.redirect('/admin-dashboard');
 } catch (err) {
 next(err);
