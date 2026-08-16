@@ -1012,6 +1012,39 @@ style="font-size:13px; color:#666;">Standard Delivery Charge:
       });
     });
 
+    // V47: Employee Management is presented as a real closed/open card inside Admin Control Panel.
+    // Existing employee routes/forms remain unchanged; this only fixes the dashboard presentation.
+    const staffBox=document.getElementById('staffBox');
+    if(staffBox && staffBox.parentElement===root && !staffBox.closest('.admin-section-card')){
+      const card=document.createElement('section');
+      card.className='admin-section-card employee-management-card';
+      card.id='staffBox';
+      card.dataset.sectionId='staffBox';
+      const summary=staffBox.querySelector(':scope > summary');
+      const header=document.createElement('button');
+      header.type='button';
+      header.className='admin-section-header';
+      header.setAttribute('aria-expanded','false');
+      header.innerHTML='<span class="admin-section-title">'+(summary?summary.innerHTML:'👷 Employee Management')+'</span><span class="admin-section-arrow">＋</span>';
+      const body=document.createElement('div');
+      body.className='admin-section-body';
+      body.hidden=true;
+      const content=[...staffBox.children].filter(el=>el!==summary);
+      staffBox.parentNode.insertBefore(card,staffBox);
+      card.appendChild(header);
+      card.appendChild(body);
+      content.forEach(el=>body.appendChild(el));
+      staffBox.remove();
+      header.addEventListener('click',()=>{
+        const opening=body.hidden;
+        body.hidden=!opening;
+        header.setAttribute('aria-expanded',String(opening));
+        card.classList.toggle('open',opening);
+        const arrow=header.querySelector('.admin-section-arrow');
+        if(arrow) arrow.textContent=opening?'−':'＋';
+      });
+    }
+
     root.dataset.adminOrganized='1';
     return true;
   }
@@ -1019,6 +1052,7 @@ style="font-size:13px; color:#666;">Standard Delivery Charge:
     if(organizeAdminDashboard()) return;
     setTimeout(organizeAdminDashboard,50);
     setTimeout(organizeAdminDashboard,250);
+    setTimeout(organizeAdminDashboard,800);
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot);
   else boot();
@@ -1814,7 +1848,7 @@ app.post('/admin/staff/permissions/:id', async(req,res,next)=>{ try {
  }catch(e){next(e);} });
 
 
-// ================= V46 EMPLOYEE MANAGEMENT UI =================
+// ================= V47 EMPLOYEE MANAGEMENT UI CARD =================
 function v46Esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 app.get('/admin/employee-activity', async(req,res,next)=>{
   try{
