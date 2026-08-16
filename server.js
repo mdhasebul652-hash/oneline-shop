@@ -962,7 +962,7 @@ style="font-size:13px; color:#666;">Standard Delivery Charge:
     const root=document.querySelector('.container');
     if(!root || root.dataset.adminOrganized==='1') return false;
 
-    const sectionIds=['addProductSec','ordersSec','usersSec','messageSendSec','chatsSec','couponsSec','facebookSec','settingsSec','subAdminSec','productRequestsSec','productsSec'];
+    const sectionIds=['addProductSec','ordersSec','usersSec','messageSendSec','chatsSec','couponsSec','facebookSec','settingsSec','subAdminSec','productRequestsSec','productsSec','staffBox'];
     const nav=[...root.children].find(el => el.tagName==='DIV' && /Add Product/.test(el.textContent||'') && /Sell Products/.test(el.textContent||''));
     if(nav){
       nav.classList.add('admin-section-nav');
@@ -972,7 +972,7 @@ style="font-size:13px; color:#666;">Standard Delivery Charge:
 
     // Only direct children are used as section anchors. Each anchor and every sibling
     // belonging to it are moved into one closed card, so controls cannot remain loose below.
-    const headings=sectionIds.map(id=>document.getElementById(id)).filter(h=>h && h.parentElement===root);
+    const headings=sectionIds.filter(id=>id!=='staffBox').map(id=>document.getElementById(id)).filter(h=>h && h.parentElement===root);
     if(!headings.length) return false;
 
     headings.forEach(h=>{
@@ -996,7 +996,7 @@ style="font-size:13px; color:#666;">Standard Delivery Charge:
       let node=card.nextSibling;
       while(node){
         const next=node.nextSibling;
-        if(node.nodeType===1 && node.tagName==='H3' && sectionIds.includes(node.id)) break;
+        if(node.nodeType===1 && ((node.tagName==='H3' && sectionIds.includes(node.id)) || node.id==='staffBox')) break;
         if(node.nodeType===1 && node.tagName==='HR'){ node.remove(); node=next; continue; }
         body.appendChild(node);
         node=next;
