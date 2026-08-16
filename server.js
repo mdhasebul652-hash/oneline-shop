@@ -182,6 +182,13 @@ subAdminShopName: { type: String, default: '' },
 subAdminBusinessInfo: { type: String, default: '' },
 subAdminWhatsApp: { type: String, default: '' },
 subAdminBusinessCategories: { type: [String], default: [] },
+adminSections: { type: [String], default: [] },
+staffParentAdminId: { type: String, default: '' },
+staffStatus: { type: String, default: 'active' },
+staffAssignedSections: { type: [String], default: [] },
+staffCreatedByEmail: { type: String, default: '' },
+staffCreatedAt: { type: Date, default: null },
+staffPwaSection: { type: String, default: '' },
 subAdminWarning: { type: String, default: '' },
 approvedBy: { type: String, default: '' },
 approvedAt: { type: Date, default: null },
@@ -368,7 +375,9 @@ function requireMainAdmin(req, res) {
   return true;
 }
 function isSubAdmin(user) { return !!user && user.role === 'subadmin'; }
-function isStaff(user) { return isMainAdmin(user) || isSubAdmin(user); }
+function isEmployee(user) { return !!user && user.role === 'staff' && user.staffStatus === 'active'; }
+function dataOwnerId(user) { return isEmployee(user) && user.staffParentAdminId ? String(user.staffParentAdminId) : String(user && user._id || ''); }
+function isStaff(user) { return isMainAdmin(user) || isSubAdmin(user) || isEmployee(user); }
 // Users with a Sub Admin application that is not yet active must continue using the shop as normal customers.
 function isCustomerLike(user) { return !!user && (user.role === 'user' || (user.role === 'subadmin' && !subAdminIsActive(user))); }
 function subAdminIsActive(user) {
@@ -379,6 +388,21 @@ if (user.activationExpiresAt && new Date(user.activationExpiresAt).getTime() < D
 return true;
 }
 function canManageStaffData(user) { return isMainAdmin(user) || subAdminIsActive(user); }
+const ADMIN_SECTION_KEYS = ['addProduct','sellProducts','orders','users','qa','coupons','facebook','settings','subAdmin','productRequests','products','help'];
+function subAdminHasSection(user, section) {
+  if (isMainAdmin(user)) return true;
+  if (isEmployee(user)) {
+    const allowed = Array.isArray(user.staffAssignedSections) ? user.staffAssignedSections : [];
+    return allowed.includes(section);
+  }
+  if (!isSubAdmin(user) || !subAdminIsActive(user)) return false;
+  const allowed = Array.isArray(user.adminSections) ? user.adminSections : [];
+  // Empty permission means no assigned section, never full access.
+  return allowed.includes(section);
+}
+function requireAdminSection(section) {
+  return (req,res,next) => { if (!req.user || !subAdminHasSection(req.user, section)) return res.status(403).send('This Admin section is not assigned to your account.'); next(); };
+}
 function dbReady() { return mongoose.connection.readyState === 1; }
 function normalizeEmail(value) { return String(value || '').trim().toLowerCase(); }
 function safeText(value, max=5000) { return String(value || '').trim().slice(0, max); }
@@ -414,7 +438,43 @@ const ALL_CATEGORIES = [
 'BeautyCare', 'Electric'
 ];
 // ================= Global Header & Image Modal Setup =================
-const globalHeaderHTML = ` <link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#f85606"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"> <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"> <style> * { box-sizing: border-box; } body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0 0 65px 0; background: #f4f4f4; color: #222; -webkit-text-size-adjust: 100%; } header { background: #f85606; color: white; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 1000; box-shadow: 0 2px 5px rgba(0,0,0,0.1); width: 100%; } .logo { font-size: 18px; font-weight: bold; text-decoration: none; color: white; white-space: nowrap; display: flex; align-items: center; gap: 5px; } .search-bar { display: flex; flex: 1; max-width: 550px; margin: 0 10px; } .search-bar input { width: 100%; padding: 8px 12px; border: none; border-radius: 4px 0 0 4px; outline: none; font-size: 14px; } .search-bar button { background: #ffe11b; border: none; padding: 0 15px; border-radius: 0 4px 4px 0; cursor: pointer; font-weight: bold; font-size: 14px; color: #333; } .categories-nav { background: white; padding: 10px 15px; display: flex; gap: 10px; overflow-x: auto; box-shadow: 0 2px 4px rgba(0,0,0,0.05); white-space: nowrap; -webkit-overflow-scrolling: touch; position: sticky; top: 55px; z-index: 999; } .categories-nav::-webkit-scrollbar { display: none; } .categories-nav a { text-decoration: none; color: #333; font-size: 13px; font-weight: 500; padding: 6px 12px; background: #f0f0f0; border-radius: 20px; transition: 0.2s; } .categories-nav a:hover { background: #f85606; color: white; } .bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; background: #fff; display: flex; justify-content: space-around; padding: 8px 0; border-top: 1px solid #ddd; z-index: 1000; box-shadow: 0 -2px 5px rgba(0,0,0,0.05); } .bottom-nav a { text-decoration: none; color: #666; font-size: 11px; display: flex; flex-direction: column; align-items: center; text-align: center; font-weight: 500; } .bottom-nav a span { font-size: 18px; margin-bottom: 2px; } .bottom-nav a:hover, .bottom-nav a.active { color: #f85606; } .container { max-width: 1200px; margin: 15px auto; padding: 0 10px; width: 100%; } .product-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; } .product-card { background: white; padding: 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; flex-direction: column; justify-content: space-between; text-decoration: none; color: inherit; transition: transform 0.2s; } .product-card img { width: 100%; height: 160px; object-fit: contain; background: #fff; border-radius: 4px; cursor: pointer; } .product-card h4 { font-size: 14px; color: #222; margin: 8px 0 4px 0; height: 38px; overflow: hidden; line-height: 1.3; font-weight: 600; } .price { color: #f85606; font-size: 16px; font-weight: bold; margin: 4px 0; } .btn { background: #f85606; color: white; border: none; padding: 10px 16px; border-radius: 4px; cursor: pointer; text-decoration: none; text-align: center; display: inline-block; font-size: 14px; font-weight: 600; } .btn-buy { background: #ffe11b; color: #333; font-weight: bold; } @media (min-width: 768px) { .product-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 15px; } .product-card img { height: 190px; } .bottom-nav { display: none; } body { padding-bottom: 0; } } </style> <!-- Image Modal CSS for Large Preview --> <div id="imageModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.8); justify-content:center; align-items:center;"> <span onclick="closeImageModal()" style="position:absolute; top:20px; right:30px; color:#fff; font-size:40px; font-weight:bold; cursor:pointer;">&times;</span> <img id="modalImg" style="max-width:90%; max-height:90%; border-radius:6px; box-shadow:0 0 20px rgba(255,255,255,0.3);"> </div> <script> function openImageModal(src) { document.getElementById('modalImg').src = src; document.getElementById('imageModal').style.display = 'flex'; } function closeImageModal() { document.getElementById('imageModal').style.display = 'none'; } </script>  <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>`;
+const globalHeaderHTML = ` <link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#f85606"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"> <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"> <style> * { box-sizing: border-box; } body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0 0 65px 0; background: #f4f4f4; color: #222; -webkit-text-size-adjust: 100%; } header { background: #f85606; color: white; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 1000; box-shadow: 0 2px 5px rgba(0,0,0,0.1); width: 100%; } .logo { font-size: 18px; font-weight: bold; text-decoration: none; color: white; white-space: nowrap; display: flex; align-items: center; gap: 5px; } .search-bar { display: flex; flex: 1; max-width: 550px; margin: 0 10px; } .search-bar input { width: 100%; padding: 8px 12px; border: none; border-radius: 4px 0 0 4px; outline: none; font-size: 14px; } .search-bar button { background: #ffe11b; border: none; padding: 0 15px; border-radius: 0 4px 4px 0; cursor: pointer; font-weight: bold; font-size: 14px; color: #333; } .categories-nav { background: white; padding: 10px 15px; display: flex; gap: 10px; overflow-x: auto; box-shadow: 0 2px 4px rgba(0,0,0,0.05); white-space: nowrap; -webkit-overflow-scrolling: touch; position: sticky; top: 55px; z-index: 999; } .categories-nav::-webkit-scrollbar { display: none; } .categories-nav a { text-decoration: none; color: #333; font-size: 13px; font-weight: 500; padding: 6px 12px; background: #f0f0f0; border-radius: 20px; transition: 0.2s; } .categories-nav a:hover { background: #f85606; color: white; } .bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; background: #fff; display: flex; justify-content: space-around; padding: 8px 0; border-top: 1px solid #ddd; z-index: 1000; box-shadow: 0 -2px 5px rgba(0,0,0,0.05); } .bottom-nav a { text-decoration: none; color: #666; font-size: 11px; display: flex; flex-direction: column; align-items: center; text-align: center; font-weight: 500; } .bottom-nav a span { font-size: 18px; margin-bottom: 2px; } .bottom-nav a:hover, .bottom-nav a.active { color: #f85606; } .container { max-width: 1200px; margin: 15px auto; padding: 0 10px; width: 100%; } .product-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; } .product-card { background: white; padding: 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; flex-direction: column; justify-content: space-between; text-decoration: none; color: inherit; transition: transform 0.2s; } .product-card img { width: 100%; height: 160px; object-fit: contain; background: #fff; border-radius: 4px; cursor: pointer; } .product-card h4 { font-size: 14px; color: #222; margin: 8px 0 4px 0; height: 38px; overflow: hidden; line-height: 1.3; font-weight: 600; } .price { color: #f85606; font-size: 16px; font-weight: bold; margin: 4px 0; } .btn { background: #f85606; color: white; border: none; padding: 10px 16px; border-radius: 4px; cursor: pointer; text-decoration: none; text-align: center; display: inline-block; font-size: 14px; font-weight: 600; } .btn-buy { background: #ffe11b; color: #333; font-weight: bold; } @media (min-width: 768px) { .product-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 15px; } .product-card img { height: 190px; } .bottom-nav { display: none; } body { padding-bottom: 0; } } </style> <!-- Image Modal CSS for Large Preview --> <div id="imageModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.8); justify-content:center; align-items:center;"> <span onclick="closeImageModal()" style="position:absolute; top:20px; right:30px; color:#fff; font-size:40px; font-weight:bold; cursor:pointer;">&times;</span> <img id="modalImg" style="max-width:90%; max-height:90%; border-radius:6px; box-shadow:0 0 20px rgba(255,255,255,0.3);"> </div> <script> function openImageModal(src) { document.getElementById('modalImg').src = src; document.getElementById('imageModal').style.display = 'flex'; } function closeImageModal() { document.getElementById('imageModal').style.display = 'none'; } </script>  <script>
+(function(){
+  const KEY='onlineShopPreserveScrollY';
+  function saveScroll(){
+    try{sessionStorage.setItem(KEY,String(window.scrollY||window.pageYOffset||0));}catch(e){}
+  }
+  function restoreScroll(){
+    try{
+      const raw=sessionStorage.getItem(KEY);
+      if(raw===null)return;
+      sessionStorage.removeItem(KEY);
+      const y=Math.max(0,parseInt(raw,10)||0);
+      requestAnimationFrame(()=>requestAnimationFrame(()=>window.scrollTo({top:y,left:0,behavior:'instant'})));
+      setTimeout(()=>window.scrollTo(0,y),80);
+      setTimeout(()=>window.scrollTo(0,y),250);
+    }catch(e){}
+  }
+  document.addEventListener('submit',function(e){saveScroll();},true);
+  document.addEventListener('click',function(e){
+    const el=e.target&&e.target.closest?e.target.closest('a,button,input[type="submit"]'):null;
+    if(!el)return;
+    if(el.closest('form')){saveScroll();return;}
+    if(el.tagName==='A'){
+      const href=el.getAttribute('href')||'';
+      if(href && !href.startsWith('#') && !/^https?:\/\//i.test(href) && !href.startsWith('mailto:') && !href.startsWith('tel:')){
+        try{
+          const u=new URL(href,window.location.href);
+          if(u.origin===window.location.origin && u.pathname===window.location.pathname) saveScroll();
+        }catch(e){}
+      }
+    }
+  },true);
+  window.addEventListener('pageshow',restoreScroll);
+  window.addEventListener('load',restoreScroll);
+  restoreScroll();
+})();
+</script> <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>`;
 const getNavbarHTML = (user) => ` <header> <a href="/" class="logo">🛒Online Shop</a> <form action="/search" method="GET" class="search-bar"> <input type="text" name="q" placeholder="Search in Online Shop..." required> <button type="submit">🔍</button> </form> </header> <div class="categories-nav"> <a href="/">🔥All</a> <a href="/category/Fashion">👗ফ্যাশন</a> <a href="/category/Supershop">🛒সুপার শপ</a> <a href="/category/Pharmacy">💊ফার্মেসি</a> <a href="/category/Food">🍲খাদ্যপণ্য</a> <a href="/category/Sports">⚽স্পোর্ট স</a> <a href="/category/Books">📚বই</a> <a href="/category/Stationery">✏️স্টেশনারি</a> <a href="/category/HomeDecor">🛋️হোম ডেকোর ও ফার্নিচার</a> <a href="/category/BeautyCare">💄বিউটি পার্লার কেয়ার</a> <a href="/category/Electric">⚡ইলেকট্রিক</a> </div> <div class="bottom-nav"> <a href="/"><span>🏠</span>Home</a> <a href="/wishlist"><span>❤️</span>Wishlist</a> <a href="/cart"><span>🛒</span>Cart</a> <a href="/my-orders"><span>📦</span>Orders</a> ${user ? `<a href="/notifications" style="position:relative;"><span>🔔</span>Alerts <b id="notificationBadge" style="display:none;position:absolute;top:-3px;right:8px;background:#dc3545;color:#fff;border-radius:20px;padding:1px 5px;font-size:9px;">0</b></a><a href="/request-inbox" style="position:relative;"><span>📥</span>Inbox <b id="requestInboxBadge" style="display:none;position:absolute;top:-3px;right:8px;background:#dc3545;color:#fff;border-radius:20px;padding:1px 5px;font-size:9px;">0</b></a><a href="/dashboard"><span>👤</span>Account</a>` : `<a href="/login"><span>🔑</span>Login</a>`} ${user && ((isMainAdmin(user)) || (user.role === 'subadmin' && subAdminIsActive(user))) ? `<a href="/admin-dashboard"><span>⚙️</span>${isMainAdmin(user) ? 'Admin' : 'Seller Admin'}</a>` : ''} </div> ${user ? `<script>(async()=>{try{const r=await fetch('/api/request-chat/unread-count');const d=await r.json();const b=document.getElementById('requestInboxBadge');if(b&&d.count>0){b.textContent=d.count>99?'99+':d.count;b.style.display='inline-block';};const nr=await fetch('/api/notifications/unread-count');const nd=await nr.json();const nb=document.getElementById('notificationBadge');if(nb&&nd.count>0){nb.textContent=nd.count>99?'99+':nd.count;nb.style.display='inline-block';}}catch(e){}})();</script>` : ''} ${user && user.role !== 'admin' ? `
 <div style="position: fixed; bottom: 75px; right: 20px; z-index: 1001;">
 <button onclick="toggleUserChatBox()" style="background: #f85606; color: white; border: none; border-radius: 50px; padding: 12px 18px; font-size: 15px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 8px;">
@@ -464,6 +524,85 @@ document.getElementById('userChatContentContainer').innerHTML = '<p style="color
 </script>
 ` : ''} `;
 // ================= Public & Homepage Routes =================
+// ===== V45 EMPLOYEE ACCOUNTABILITY / AUDIT LOG =====
+
+// ===== V45 EMPLOYEE ACCOUNTABILITY / AUDIT LOG =====
+const V45_AUDIT_ACTIONS = new Set([
+  'PRODUCT_CREATED','PRODUCT_UPDATED','PRODUCT_PUBLISHED','PRODUCT_UNPUBLISHED',
+  'PRODUCT_DELETED','PRODUCT_STOCK_UPDATED','PRODUCT_REQUEST_ACCEPTED',
+  'ORDER_CREATED','ORDER_UPDATED','ORDER_STATUS_CHANGED','COUPON_CREATED',
+  'COUPON_UPDATED','COUPON_DELETED','ADMIN_SETTING_UPDATED'
+]);
+
+function v45AuditActor(req) {
+  const u = req.user || req.session?.user || req.session?.admin || req.session?.subAdmin || null;
+  return {
+    userId: u?._id || u?.id || null,
+    name: u?.name || u?.username || u?.email || 'Unknown',
+    role: u?.role || 'unknown'
+  };
+}
+
+async function v45WriteAuditLog(req, action, details = {}) {
+  try {
+    if (!V45_AUDIT_ACTIONS.has(action)) return;
+    const db = mongoose?.connection?.db;
+    if (!db) return;
+    await db.collection('employee_activity_logs').insertOne({
+      action,
+      actor: v45AuditActor(req),
+      details,
+      ip: req.ip || req.headers?.['x-forwarded-for'] || null,
+      userAgent: req.headers?.['user-agent'] || null,
+      createdAt: new Date()
+    });
+  } catch (e) {
+    console.error('V45 audit log error:', e.message);
+  }
+}
+
+async function v45Audit(req, res, next) {
+  res.locals.v45Audit = (action, details) => v45WriteAuditLog(req, action, details);
+  next();
+}
+
+function v45AuditBoxHtml() {
+  return `
+    <section class="v45-audit-box" id="employee-accountability">
+      <button type="button" class="v45-audit-toggle" onclick="document.getElementById('v45-audit-content').classList.toggle('open')">
+        Employee Accountability & Activity
+      </button>
+      <div id="v45-audit-content" class="v45-audit-content">
+        <div class="v45-audit-loading">Activity logs are available from the Employee Accountability section.</div>
+      </div>
+    </section>
+  `;
+}
+
+const V45_AUDIT_CSS = `
+<style>
+.v45-audit-box{margin:16px 0;border:1px solid #ddd;border-radius:12px;background:#fff;overflow:hidden}
+.v45-audit-toggle{width:100%;padding:14px 16px;border:0;background:#f6f7f9;text-align:left;font-weight:700;cursor:pointer}
+.v45-audit-content{display:none;padding:16px}
+.v45-audit-content.open{display:block}
+</style>`;
+
+async function v45EnsureAuditIndexes() {
+  try {
+    const db = mongoose?.connection?.db;
+    if (!db) return;
+    await db.collection('employee_activity_logs').createIndex({createdAt:-1});
+    await db.collection('employee_activity_logs').createIndex({'actor.userId':1, createdAt:-1});
+    await db.collection('employee_activity_logs').createIndex({action:1, createdAt:-1});
+  } catch {}
+}
+try {
+  if (mongoose?.connection) mongoose.connection.once('connected', v45EnsureAuditIndexes);
+} catch {}
+app.use(v45Audit);
+
+
+
 app.get('/', async (req, res, next) => {
 try {
 let categoryFilter = req.query.category;
@@ -884,7 +1023,7 @@ style="font-size:13px; color:#666;">Standard Delivery Charge:
   else boot();
 })();
 </script>
-<style>
+${(isMainAdmin(req.user)||isSubAdmin(req.user)) ? `<details class="admin-section-box" id="staffBox"><summary>👷 Employee / Staff Section Control</summary><div class="admin-section-body"><h3>👷 Employee / Staff Section Control</h3><p style="font-size:12px;color:#666">আপনার নিয়ন্ত্রণাধীন section-এর কাজ একজন employee-কে দিন। Employee শুধু assigned section-ই দেখতে ও ব্যবহার করতে পারবে।</p><form action="/admin/staff/create" method="POST" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:10px;display:grid;gap:7px;"><input name="name" placeholder="Employee Name" required><input name="email" type="email" placeholder="Employee Email" required><input name="password" type="password" minlength="6" placeholder="Temporary Password" required><label style="font-size:12px;font-weight:700">Assign Section(s)</label><div class="admin-permission-list">${(isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[])).map(k=>`<label><input type="checkbox" name="sections" value="${k}"> ${k}</label>`).join('')}</div><button class="btn" style="background:#28a745">➕ Create Employee Account</button></form><div style="margin-top:12px"><b style="font-size:13px">Your Employees</b>${(await User.find({role:'staff',staffParentAdminId:String(req.user._id)}).sort({_id:-1}).lean()).map(st=>`<details style="margin-top:7px;border:1px solid #ddd;border-radius:8px;padding:7px"><summary>${st.name||st.email} — ${st.email}</summary><div style="font-size:12px;color:#666;margin:6px 0">Assigned: ${(st.staffAssignedSections||[]).join(', ')||'None'}</div><form action="/admin/staff/permissions/${st._id}" method="POST" style="background:#f8fafc;padding:7px;border-radius:7px"><div class="admin-permission-list">${(isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[])).map(k=>`<label><input type="checkbox" name="sections" value="${k}" ${(st.staffAssignedSections||[]).includes(k)?'checked':''}> ${k}</label>`).join('')}</div><button class="btn" style="margin-top:6px;padding:5px 9px">💾 Save Employee Access</button></form></details>`).join('')||'<div style="color:#777;font-size:12px;margin-top:6px">কোনো employee নেই।</div>'}</div></div></details><hr style="margin:20px 0;">` : ''}<style>
 .admin-section-nav{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px!important;padding:12px!important;background:#f7f9fc;border:1px solid #e2e8f0;border-radius:16px!important;box-shadow:0 4px 16px rgba(0,0,0,.05);position:sticky;top:62px;z-index:20}
 .admin-menu-item{margin:0!important;width:100%;min-height:58px;display:flex!important;align-items:center;justify-content:center;line-height:1.2;border-radius:12px!important;box-shadow:0 2px 7px rgba(0,0,0,.06);font-size:12px!important;padding:9px 8px!important}
 .admin-section-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;margin:16px 0;overflow:hidden;box-shadow:0 4px 18px rgba(15,23,42,.06);scroll-margin-top:145px}
@@ -1197,7 +1336,7 @@ return res.send(`<script>alert('Invalid email or password!'); window.location.hr
 }
 // A pending/rejected/suspended/expired Sub Admin keeps normal customer access. Only the Seller Admin panel is gated by subAdminIsActive().
 res.cookie('userSession', JSON.stringify({ email: user.email, role: user.role }));
-let safeRedirect = (typeof redirect === 'string' && redirect.startsWith('/')) ? redirect : '/';
+let safeRedirect = isEmployee(user) ? '/admin-dashboard' : ((typeof redirect === 'string' && redirect.startsWith('/')) ? redirect : '/');
 res.redirect(safeRedirect);
 } catch (err) {
 next(err);
@@ -1402,10 +1541,24 @@ function requireActiveStaff(req, res) {
   if (!req.user) { res.redirect('/login'); return false; }
   if (isMainAdmin(req.user)) return true;
   if (isSubAdmin(req.user) && subAdminIsActive(req.user)) return true;
+  if (isEmployee(req.user) && Array.isArray(req.user.staffAssignedSections) && req.user.staffAssignedSections.length > 0) return true;
   res.status(403).send('<div style="font-family:Arial;padding:30px;max-width:700px;margin:auto"><h2>Unauthorized</h2><p>আপনার Seller Admin access বর্তমানে Active নয়। তবে সাধারণ Customer হিসেবে site ব্যবহার করতে পারবেন।</p><a href="/">Home</a></div>');
   return false;
 }
 // ================= Admin Panel Advanced Features =================
+app.get('/staff-manifest.webmanifest', async (req,res,next)=>{
+  try {
+    if(!req.user || !isEmployee(req.user)) return res.status(403).json({error:'Staff access required'});
+    const allowed=Array.isArray(req.user.staffAssignedSections)?req.user.staffAssignedSections:[];
+    const section=String(req.query.section||allowed[0]||'');
+    if(!allowed.includes(section)) return res.status(403).json({error:'Section not assigned'});
+    const labels={addProduct:'Add Product',sellProducts:'Sell Products',orders:'Manage Orders',users:'Users',qa:'Q&A & Messages',coupons:'Coupons',facebook:'Facebook',settings:'Site Settings',productRequests:'Customer Product Requests',products:'All Products',help:'Main Admin Help'};
+    res.set('Content-Type','application/manifest+json');
+    res.set('Cache-Control','no-store, private, max-age=0');
+    res.json({name:'Online Shop — '+(labels[section]||'Staff Work'),short_name:labels[section]||'Staff',start_url:'/admin-dashboard#'+section+'Sec',scope:'/',display:'standalone',background_color:'#f4f4f4',theme_color:'#f85606',description:'Assigned staff section'});
+  }catch(e){next(e);}
+});
+
 app.get('/admin-dashboard', async (req, res, next) => {
 try {
 if (!requireActiveStaff(req, res)) return;
@@ -1413,13 +1566,13 @@ if (!requireActiveStaff(req, res)) return;
 // accepting Sub Admin may see that request/customer details. Other Sub Admins
 // must not receive the accepted request in the dashboard HTML at all.
 res.set('Cache-Control','no-store, private, max-age=0');
-let dataFilter = isMainAdmin(req.user) ? {} : { ownerId: String(req.user._id) };
+let dataFilter = isMainAdmin(req.user) ? {} : { ownerId: dataOwnerId(req.user) };
 let products = await Product.find(dataFilter).sort({ _id: -1 });
-let orders = isMainAdmin(req.user) ? await Order.find().sort({ _id: -1 }) : await Order.find({ 'items.ownerId': String(req.user._id) }).sort({ _id: -1 });
+let orders = isMainAdmin(req.user) ? await Order.find().sort({ _id: -1 }) : await Order.find({ 'items.ownerId': dataOwnerId(req.user) }).sort({ _id: -1 });
 let users = await User.find().sort({ _id: -1 });
 let chats = isMainAdmin(req.user) ? await Chat.find().sort({ _id: -1 }) : await Chat.find(dataFilter).sort({ _id: -1 });
 let coupons = await Coupon.find(dataFilter).sort({ _id: -1 });
-let siteSetting = (isMainAdmin(req.user) ? await SiteSetting.findOne() : await SiteSetting.findOne({ ownerId: String(req.user._id) })) || { bkashNumber: '01700000000',
+let siteSetting = (isMainAdmin(req.user) ? await SiteSetting.findOne() : await SiteSetting.findOne({ ownerId: dataOwnerId(req.user) })) || { bkashNumber: '01700000000',
 nagadNumber: '01800000000', pageId: '', accessToken: '' };
 let categoryOptions = ALL_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('');
 let productRequestRows = isMainAdmin(req.user)
@@ -1465,7 +1618,7 @@ let ordersHTML = orders.map(o => ` <div style="background:#fff; padding:10px; ma
 let usersHTML = users.map(u => ` <div style="background:#fff; padding:8px; margin-bottom:6px; border-radius:4px; border:1px solid #eee; font-size:13px; display:flex; justify-content:space-between; align-items:center;"> <div> <b>${u.name || 'No Name'}</b> (${u.email})<br> <span>Phone: ${u.phone || 'N/A'} | Addr: ${u.address || 'N/A'}</span> </div> <div> <span style="color:${u.isBlocked ? 'red' : 'green'}; font-weight:bold; margin-right:8px;">${u.isBlocked ? 'Blocked (COD Off)' : 'Active'}</span> <a href="/admin/toggle-block-user/${u._id}" class="btn" style="background:${u.isBlocked ? '#28a745' : '#dc3545'}; padding:4px 8px; font-size:11px;">${u.isBlocked ? 'Unblock' : 'Block COD'}</a> </div> </div> `).join('');
 let chatsHTML = chats.map(c => ` <div style="background:#fff; padding:10px; margin-bottom:8px; border-radius:4px; border:1px solid #eee; font-size:13px;"> <div style="display:flex; align-items:flex-start; gap:10px;"> ${c.productImage ? `<img src="${mediaUrl(c.productImage)}" width=65 height=65 style="width:65px; height:65px; object-fit:cover; border-radius:5px; border:1px solid #f85606; cursor:pointer; flex-shrink:0;" onclick="openImageModal('${mediaUrl(c.productImage)}')" title="Click to view larger">` : `<div style="width:65px; height:65px; display:flex; align-items:center; justify-content:center; background:#eee; color:#777; border-radius:5px; font-size:10px; text-align:center; flex-shrink:0;">No image</div>`} <div style="flex:1; min-width:0;"> <p style="margin:0 0 4px 0;"><b>User:</b> ${c.userEmail} | <b>Product:</b> ${c.productName || 'N/A'}</p> <p style="margin:0 0 4px 0; color:#333;"><b>Question:</b> ${c.message}</p> </div> </div> <form action="/admin/reply-chat/${c._id}" method="POST" style="margin-top:6px; display:flex; gap:6px;"> <input type="text" name="reply" value="${c.reply || ''}" placeholder="Write reply..." style="flex:1; padding:4px; font-size:12px;" required> <button type="submit" class="btn" style="padding:4px 10px; font-size:12px;">Reply</button> </form> <form action="/admin/delete-chat/${c._id}" method="POST" style="margin-top:6px;" onsubmit="return confirm('এই মেসেজটি স্থায়ীভাবে ডিলিট করবেন?');"> <button type="submit" class="btn" style="background:#dc3545; padding:4px 10px; font-size:12px;">🗑️ Delete Message</button> </form> </div> `).join('');
 let couponsHTML = coupons.map(coup => ` <div style="background:#fff; padding:8px; margin-bottom:6px; border-radius:4px; border:1px solid #eee; font-size:13px; display:flex; justify-content:space-between; align-items:center;"> <span><b>Code:</b> ${coup.code} | <b>Discount:</b> ৳${coup.discountAmount}</span> <a href="/admin/delete-coupon/${coup._id}" class="btn" style="background:#dc3545; padding:4px 8px; font-size:11px;">Delete</a> </div> `).join('');
-res.send(` <!DOCTYPE html> <html> <head><title>Admin Dashboard</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="background:white; padding:20px; border-radius:6px;"> <h2 style="margin-top:0; color:#f85606;">⚙️Admin Control Panel</h2>${isMainAdmin(req.user) ? `<div style="background:#e8f5e9;border:1px solid #b7dfb9;padding:8px;border-radius:8px;margin:8px 0;font-size:12px;">🔐 Main Admin verified: ${req.user.email}</div>` : ''}${isSubAdmin(req.user) ? `<div style="background:#fff3cd;padding:10px;border-radius:6px;margin-bottom:12px;"><b>Seller Admin:</b> ${req.user.subAdminShopName || req.user.name || req.user.email} | Status: ${req.user.subAdminStatus} | ${req.user.unlimitedFree ? 'Unlimited Free' : (req.user.activationExpiresAt ? 'Expiry: '+new Date(req.user.activationExpiresAt).toLocaleDateString() : 'Expiry not set')} ${req.user.subAdminWarning ? `<br><span style="color:#b94a48;"><b>Notice:</b> ${req.user.subAdminWarning}</span>` : ''}</div>` : ''}${isSubAdmin(req.user) ? `<div style="background:#eef7ff;padding:12px;border-radius:6px;margin-bottom:12px;"><h4 style="margin:0 0 8px 0;">🆘 Main Admin Help / Support</h4><form action="/sub-admin/support" method="POST"><textarea name="message" required placeholder="Main Admin-এর কাছে সাহায্যের কথা লিখুন..." style="width:100%;height:60px;padding:8px;border:1px solid #ccc;border-radius:5px;"></textarea><label style="display:block;font-size:12px;font-weight:600;margin-top:8px;">WhatsApp নম্বর হারিয়ে গেলে নতুন WhatsApp নম্বর দিন (ঐচ্ছিক)</label><input type="text" name="requestedWhatsApp" placeholder="017XXXXXXXX অথবা https://wa.me/..." style="width:100%;padding:8px;border:1px solid #ccc;border-radius:5px;"><small style="display:block;color:#777;margin-top:5px;">নতুন নম্বর দিলে Main Admin যাচাই করে account-এর WhatsApp নম্বর পরিবর্তন করতে পারবেন।</small><button class="btn" style="margin-top:6px;padding:7px 12px;">Send Help Request</button></form></div>` : ''} <style>
+res.send(` <!DOCTYPE html> <html> <head><title>Admin Dashboard</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="background:white; padding:20px; border-radius:6px;"> <h2 style="margin-top:0; color:#f85606;">⚙️Admin Control Panel</h2>${isMainAdmin(req.user) ? `<div style="background:#e8f5e9;border:1px solid #b7dfb9;padding:8px;border-radius:8px;margin:8px 0;font-size:12px;">🔐 Main Admin verified: ${req.user.email}</div>` : ''}${isSubAdmin(req.user) ? `<div style="background:#fff3cd;padding:10px;border-radius:6px;margin-bottom:12px;"><b>Seller Admin:</b> ${req.user.subAdminShopName || req.user.name || req.user.email} | Status: ${req.user.subAdminStatus} | ${req.user.unlimitedFree ? 'Unlimited Free' : (req.user.activationExpiresAt ? 'Expiry: '+new Date(req.user.activationExpiresAt).toLocaleDateString() : 'Expiry not set')} ${req.user.subAdminWarning ? `<br><span style="color:#b94a48;"><b>Notice:</b> ${req.user.subAdminWarning}</span>` : ''}</div>` : ''}${isSubAdmin(req.user) ? `<details class="admin-section-box" id="mainAdminHelpBox" data-section-key="help"><summary>🆘 Main Admin Help / Support</summary><div class="admin-section-body"><h4 style="margin:14px 0 8px 0;">Main Admin Help / Support</h4><form action="/sub-admin/support" method="POST"><textarea name="message" required placeholder="Main Admin-এর কাছে সাহায্যের কথা লিখুন..." style="width:100%;height:60px;padding:8px;border:1px solid #ccc;border-radius:5px;"></textarea><label style="display:block;font-size:12px;font-weight:600;margin-top:8px;">WhatsApp নম্বর হারিয়ে গেলে নতুন WhatsApp নম্বর দিন (ঐচ্ছিক)</label><input type="text" name="requestedWhatsApp" placeholder="017XXXXXXXX অথবা https://wa.me/..." style="width:100%;padding:8px;border:1px solid #ccc;border-radius:5px;"><small style="display:block;color:#777;margin-top:5px;">নতুন নম্বর দিলে Main Admin যাচাই করে account-এর WhatsApp নম্বর পরিবর্তন করতে পারবেন।</small><button class="btn" style="margin-top:6px;padding:7px 12px;">Send Help Request</button></form></div></details>` : ''} <style>
 .admin-section-launcher{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;margin:16px 0 20px}
 .admin-launch-box{appearance:none;border:1px solid #e2e7ee;background:linear-gradient(145deg,#fff,#f7f9fc);border-radius:14px;padding:14px 12px;text-align:left;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.05);transition:.18s;min-height:94px}
 .admin-launch-box:hover{transform:translateY(-2px);box-shadow:0 7px 18px rgba(0,0,0,.09);border-color:#f85606}
@@ -1475,7 +1628,38 @@ res.send(` <!DOCTYPE html> <html> <head><title>Admin Dashboard</title>${globalHe
 .admin-section-box>summary::-webkit-details-marker{display:none}.admin-section-box>summary:after{content:'＋';margin-left:auto;font-size:21px;color:#777}.admin-section-box[open]>summary:after{content:'−'}
 .admin-section-body{padding:0 16px 16px;border-top:1px solid #edf0f3}.admin-section-body>h3{display:none}.admin-section-body>hr{display:none}
 .admin-section-body .admin-inner-card{background:#f8fafc;border:1px solid #e7ebef;border-radius:12px;padding:12px;margin-top:12px}
-</style><script>function openAdminSection(id){const d=document.getElementById(id);if(!d)return;document.querySelectorAll('details.admin-section-box').forEach(x=>{if(x!==d)x.open=false});d.open=true;setTimeout(()=>d.scrollIntoView({behavior:'smooth',block:'start'}),20);}</script><div class="admin-section-launcher"> <button type="button" class="admin-launch-box" onclick="openAdminSection('addProductBox')"><span class="admin-launch-icon">➕</span><b>Add Product</b><small>নতুন পণ্য যোগ করুন</small></button> <button type="button" class="admin-launch-box" onclick="openAdminSection('sellProductsBox')"><span class="admin-launch-icon">🛍️</span><b>Sell Products</b><small>Customer-কে পণ্য পাঠান</small></button> <button type="button" class="admin-launch-box" onclick="openAdminSection('ordersBox')"><span class="admin-launch-icon">📦</span><b>Orders (${orders.length})</b><small>সব অর্ডার ম্যানেজ করুন</small></button> <button type="button" class="admin-launch-box" onclick="openAdminSection('usersBox')"><span class="admin-launch-icon">👥</span><b>Users (${users.length})</b><small>Customer ও COD control</small></button> <button type="button" class="admin-launch-box" onclick="openAdminSection('qaBox')"><span class="admin-launch-icon">💬</span><b>Q&A (${chats.length})</b><small>Message ও customer Q&A</small></button> <button type="button" class="admin-launch-box" onclick="openAdminSection('couponsBox')"><span class="admin-launch-icon">🏷️</span><b>Coupons</b><small>Coupon তৈরি ও ম্যানেজ</small></button> <button type="button" class="admin-launch-box" onclick="openAdminSection('facebookBox')"><span class="admin-launch-icon">📘</span><b>Facebook</b><small>Page, Video, Image, Reel</small></button> <button type="button" class="admin-launch-box" onclick="openAdminSection('settingsBox')"><span class="admin-launch-icon">🛠️</span><b>Settings</b><small>Payment ও Site Settings</small></button> </div> <details class="admin-section-box" id="sellProductsBox"><summary>🛍️ Sell Products</summary><div class="admin-section-body"><p style="color:#666;font-size:13px;margin:14px 0 10px">Customer নির্বাচন করে product details পাঠাতে এই section খুলুন।</p><a href="/admin/sell-products" class="btn" style="display:inline-block;background:#28a745;padding:9px 14px">🛍️ Open Sell Products</a></div></details><details class="admin-section-box" id="addProductBox"><summary>➕ Add New Product</summary><div class="admin-section-body"><hr style="margin:20px 0;"> <h3 id="addProductSec">Add New Product</h3> <form action="/admin/add-product" method="POST" enctype="multipart/form-data" style="background:#f9f9f9; padding:15px; border-radius:6px; margin-bottom:20px;"> <label style="font-size:13px;">Product Name:</label><br> <input type="text" name="name" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br> <label style="font-size:13px;">Category:</label><br> <select name="category" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required> ${categoryOptions} </select><br> <div style="display:flex; gap:10px;"> <div style="flex:1;"> <label style="font-size:13px;">Price (৳):</label><br> <input type="number" name="price" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required> </div> <div style="flex:1;"> <label style="font-size:13px;">Stock Qty:</label><br> <input type="number" name="stock" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required> </div> </div> <div style="display:flex; gap:10px;"> <div style="flex:1;"> <label style="font-size:13px;">Max Order Limit:</label><br> <input type="number" name="maxOrderLimit" value="5" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"> </div> <div style="flex:1;"> <label style="font-size:13px;">Delivery Charge (৳):</label><br> <input type="number" name="deliveryCharge" value="150" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"> </div> </div> <label style="font-size:13px;">Description:</label><br> <textarea name="description" style="width:100%; height:60px; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"></textarea><br> <label style="font-size:13px;">WhatsApp Number / Link ${isSubAdmin(req.user) ? '*' : ''}:</label><br> <input type="text" name="whatsappContact" ${isSubAdmin(req.user) ? 'required' : ''} placeholder="যেমন: 017XXXXXXXX অথবা https://wa.me/8801XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><small style="display:block;color:#777;margin-bottom:10px;">${isSubAdmin(req.user) ? 'Sub Admin-এর জন্য WhatsApp Number / Link বাধ্যতামূলক।' : 'এই Product-এর জন্য Customer সরাসরি WhatsApp-এ কথা বলতে পারবে।'}</small> <label style="font-size:13px;">Main Image:</label><br> <input type="file" name="mainImage" accept="image/*" style="margin:3px 0 10px 0;" required><br> <label style="font-size:13px;">Additional Product Images (ছোট ছোট ছবি):</label><br> <input type="file" name="additionalImages" accept="image/*" multiple style="margin:3px 0 10px 0;"><br> <small style="display:block;color:#777;margin-bottom:8px;">প্রয়োজনে একসাথে একাধিক ছবি নির্বাচন করতে পারবেন। এগুলো Product-এর নিচে thumbnail হিসেবে দেখা যাবে।</small> <button type="submit" class="btn" style="padding:8px 16px;">Save Product</button> </form></div></details> <hr style="margin:20px 0;"> <details class="admin-section-box" id="ordersBox"><summary>📦 Manage Orders</summary><div class="admin-section-body"><h3 id="ordersSec">Manage Orders</h3> <div style="max-height:400px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px; margin-bottom:20px;"> ${ordersHTML.length ? ordersHTML : '<p style="color:#777;">No orders found.</p>'} </div></div></details> <hr style="margin:20px 0;"> <details class="admin-section-box" id="usersBox"><summary>👥 Manage Users & COD</summary><div class="admin-section-body"><h3 id="usersSec">Manage Users & COD Restrictions</h3> <div style="max-height:300px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px; margin-bottom:20px;"> ${usersHTML.length ? usersHTML : '<p style="color:#777;">No users found.</p>'} </div></div></details> <hr style="margin:20px 0;"><details class="admin-section-box" id="qaBox"><summary>💬 Q&A & Customer Messages</summary><div class="admin-section-body"><h3 id="messageSendSec">📨 Send Product Message</h3><div style="background:#fff;padding:14px;border:1px solid #eee;border-radius:12px;margin-bottom:15px;"><form action="/admin/send-message" method="POST" style="display:grid;gap:8px;"><label style="font-size:13px;font-weight:600;">Customers</label><div style="border:1px solid #ddd;border-radius:8px;padding:8px;max-height:180px;overflow:auto;background:#fafafa;"><label style="display:block;font-size:12px;margin-bottom:6px;font-weight:700;"><input type="checkbox" id="sendMsgAllCustomers" onchange="toggleSendMsgCustomers(this)"> All Customers</label>${users.filter(u=>u.role==='user' || (u.role==='subadmin' && u.subAdminStatus!=='active')).map(u=>`<label style="display:block;font-size:12px;margin:4px 0;"><input type="checkbox" name="userEmails" value="${u.email}" class="sendMsgCustomer"> ${u.name||u.email} — ${u.email}</label>`).join('')}</div><label style="font-size:13px;font-weight:600;">Product</label><select name="productId" required style="padding:9px;border:1px solid #ccc;border-radius:7px;"><option value="">Select Product</option>${products.map(p=>`<option value="${p._id}">${p.name} — ৳${p.price}</option>`).join('')}</select><textarea name="message" required maxlength=3000 placeholder="Product সম্পর্কে customer-কে message লিখুন..." style="min-height:80px;padding:9px;border:1px solid #ccc;border-radius:7px;"></textarea><button class="btn" type="submit">📨 Send Message</button></form></div><script>function toggleSendMsgCustomers(cb){document.querySelectorAll('.sendMsgCustomer').forEach(x=>x.checked=cb.checked);} </script> <h3 id="chatsSec">Customer Q&A Inbox</h3> <div style="max-height:300px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px; margin-bottom:20px;"> ${chatsHTML.length ? chatsHTML : '<p style="color:#777;">No chats found.</p>'} </div> <hr style="margin:20px 0;"> </div></details> <hr style="margin:20px 0;"> <details class="admin-section-box" id="couponsBox"><summary>🏷️ Manage Coupons</summary><div class="admin-section-body"><h3 id="couponsSec">Manage Coupons</h3> <form action="/admin/add-coupon" method="POST" style="background:#f9f9f9; padding:15px; border-radius:6px; margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;"> <input type="text" name="code" placeholder="Coupon Code" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px;" required> <input type="number" name="discountAmount" placeholder="Discount Amount (৳)" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px;" required> <button type="submit" class="btn" style="padding:8px 16px;">Add Coupon</button> </form> <div style="background:#f9f9f9; padding:10px; border-radius:6px; margin-bottom:20px;"> ${couponsHTML.length ? couponsHTML : '<p style="color:#777;">No coupons found.</p>'} </div> </div></details> <hr style="margin:20px 0;"> <details class="admin-section-box" id="facebookBox"><summary>📘 Facebook Page / Video / Image / Reel</summary><div class="admin-section-body"><h3 id="facebookSec">📘 Facebook Page / Video / Image / Reel</h3>
+.admin-launcher-hidden{display:none!important}
+body.admin-trunk-open .admin-section-launcher{display:none!important}
+body.admin-trunk-open .admin-section-box:not([open]){display:none!important}
+body.admin-trunk-open .admin-section-box[open]{position:relative;margin:0 0 20px;border-radius:16px;box-shadow:0 10px 35px rgba(0,0,0,.10);min-height:calc(100vh - 110px);background:#fff}
+body.admin-trunk-open .admin-section-box[open]>summary{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #edf0f3}
+.admin-trunk-close{display:inline-flex;align-items:center;gap:6px;border:0;background:#f1f3f5;color:#333;border-radius:9px;padding:7px 11px;cursor:pointer;font-weight:600;font-size:12px;margin:12px 0 0}
+.admin-permission-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px;margin-top:8px}
+.admin-permission-list label{font-size:11px;background:#f8fafc;border:1px solid #e6e9ed;border-radius:7px;padding:6px;display:flex;gap:5px;align-items:center}
+
+</style><script>
+function openAdminSection(id){
+ const d=document.getElementById(id); if(!d)return;
+ document.querySelectorAll('details.admin-section-box').forEach(x=>{if(x!==d)x.open=false});
+ d.open=true; document.body.classList.add('admin-trunk-open');
+ if(!d.querySelector('[data-admin-trunk-close]')){ const c=document.createElement('button'); c.type='button'; c.className='admin-trunk-close'; c.setAttribute('data-admin-trunk-close','1'); c.textContent='← Back to Admin Control Panel'; d.querySelector('.admin-section-body')?.prepend(c); }
+ document.querySelector('.admin-section-launcher')?.classList.add('admin-launcher-hidden');
+ setTimeout(()=>d.scrollIntoView({behavior:'smooth',block:'start'}),20);
+}
+const ADMIN_ALLOWED_SECTIONS = ${JSON.stringify(isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(isEmployee(req.user)?(Array.isArray(req.user.staffAssignedSections)?req.user.staffAssignedSections:[]):(Array.isArray(req.user.adminSections)?req.user.adminSections:[])))};
+const IS_MAIN_ADMIN = ${isMainAdmin(req.user)?'true':'false'};
+function applySectionPermissions(){ if(IS_MAIN_ADMIN)return; document.querySelectorAll('[data-section-key]').forEach(x=>{if(!ADMIN_ALLOWED_SECTIONS.includes(x.dataset.sectionKey))x.style.display='none';}); const map={productRequestsBox:'productRequests',productsBox:'products',subAdminBox:'subAdmin'}; Object.entries(map).forEach(([id,key])=>{const el=document.getElementById(id);if(el&&!ADMIN_ALLOWED_SECTIONS.includes(key))el.style.display='none';}); }
+applySectionPermissions();
+function closeAdminTrunk(){
+ document.querySelectorAll('details.admin-section-box').forEach(x=>x.open=false);
+ document.body.classList.remove('admin-trunk-open');
+ document.querySelector('.admin-section-launcher')?.classList.remove('admin-launcher-hidden');
+ window.scrollTo({top:0,behavior:'smooth'});
+}
+document.addEventListener('click',e=>{
+ const btn=e.target.closest('[data-admin-trunk-close]'); if(btn){e.preventDefault();closeAdminTrunk();}
+});
+</script><div class="admin-section-launcher"> <button type="button" class="admin-launch-box" data-section-key="addProduct" onclick="openAdminSection('addProductBox')"><span class="admin-launch-icon">➕</span><b>Add Product</b><small>নতুন পণ্য যোগ করুন</small></button> <button type="button" class="admin-launch-box" data-section-key="sellProducts" onclick="openAdminSection('sellProductsBox')"><span class="admin-launch-icon">🛍️</span><b>Sell Products</b><small>Customer-কে পণ্য পাঠান</small></button> <button type="button" class="admin-launch-box" data-section-key="orders" onclick="openAdminSection('ordersBox')"><span class="admin-launch-icon">📦</span><b>Orders (${orders.length})</b><small>সব অর্ডার ম্যানেজ করুন</small></button> <button type="button" class="admin-launch-box" data-section-key="users" onclick="openAdminSection('usersBox')"><span class="admin-launch-icon">👥</span><b>Users (${users.length})</b><small>Customer ও COD control</small></button> <button type="button" class="admin-launch-box" data-section-key="qa" onclick="openAdminSection('qaBox')"><span class="admin-launch-icon">💬</span><b>Q&A (${chats.length})</b><small>Message ও customer Q&A</small></button> <button type="button" class="admin-launch-box" data-section-key="coupons" onclick="openAdminSection('couponsBox')"><span class="admin-launch-icon">🏷️</span><b>Coupons</b><small>Coupon তৈরি ও ম্যানেজ</small></button> <button type="button" class="admin-launch-box" data-section-key="facebook" onclick="openAdminSection('facebookBox')"><span class="admin-launch-icon">📘</span><b>Facebook</b><small>Page, Video, Image, Reel</small></button> <button type="button" class="admin-launch-box" data-section-key="settings" onclick="openAdminSection('settingsBox')"><span class="admin-launch-icon">🛠️</span><b>Settings</b><small>Payment ও Site Settings</small></button> ${isSubAdmin(req.user) ? `<button type="button" class="admin-launch-box" data-section-key="help" onclick="openAdminSection('mainAdminHelpBox')"><span class="admin-launch-icon">🆘</span><b>Main Admin Help</b><small>Message, reply ও support</small></button>` : ``} </div> <details class="admin-section-box" id="sellProductsBox" data-section-key="sellProducts"><summary>🛍️ Sell Products</summary><div class="admin-section-body"><p style="color:#666;font-size:13px;margin:14px 0 10px">Customer নির্বাচন করে product details পাঠাতে এই section খুলুন।</p><a href="/admin/sell-products" class="btn" style="display:inline-block;background:#28a745;padding:9px 14px">🛍️ Open Sell Products</a></div></details><details class="admin-section-box" id="addProductBox" data-section-key="addProduct"><summary>➕ Add New Product</summary><div class="admin-section-body"><hr style="margin:20px 0;"> <h3 id="addProductSec">Add New Product</h3> <form action="/admin/add-product" method="POST" enctype="multipart/form-data" style="background:#f9f9f9; padding:15px; border-radius:6px; margin-bottom:20px;"> <label style="font-size:13px;">Product Name:</label><br> <input type="text" name="name" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br> <label style="font-size:13px;">Category:</label><br> <select name="category" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required> ${categoryOptions} </select><br> <div style="display:flex; gap:10px;"> <div style="flex:1;"> <label style="font-size:13px;">Price (৳):</label><br> <input type="number" name="price" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required> </div> <div style="flex:1;"> <label style="font-size:13px;">Stock Qty:</label><br> <input type="number" name="stock" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required> </div> </div> <div style="display:flex; gap:10px;"> <div style="flex:1;"> <label style="font-size:13px;">Max Order Limit:</label><br> <input type="number" name="maxOrderLimit" value="5" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"> </div> <div style="flex:1;"> <label style="font-size:13px;">Delivery Charge (৳):</label><br> <input type="number" name="deliveryCharge" value="150" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"> </div> </div> <label style="font-size:13px;">Description:</label><br> <textarea name="description" style="width:100%; height:60px; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"></textarea><br> <label style="font-size:13px;">WhatsApp Number / Link ${isSubAdmin(req.user) ? '*' : ''}:</label><br> <input type="text" name="whatsappContact" ${isSubAdmin(req.user) ? 'required' : ''} placeholder="যেমন: 017XXXXXXXX অথবা https://wa.me/8801XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><small style="display:block;color:#777;margin-bottom:10px;">${isSubAdmin(req.user) ? 'Sub Admin-এর জন্য WhatsApp Number / Link বাধ্যতামূলক।' : 'এই Product-এর জন্য Customer সরাসরি WhatsApp-এ কথা বলতে পারবে।'}</small> <label style="font-size:13px;">Main Image:</label><br> <input type="file" name="mainImage" accept="image/*" style="margin:3px 0 10px 0;" required><br> <label style="font-size:13px;">Additional Product Images (ছোট ছোট ছবি):</label><br> <input type="file" name="additionalImages" accept="image/*" multiple style="margin:3px 0 10px 0;"><br> <small style="display:block;color:#777;margin-bottom:8px;">প্রয়োজনে একসাথে একাধিক ছবি নির্বাচন করতে পারবেন। এগুলো Product-এর নিচে thumbnail হিসেবে দেখা যাবে।</small> <button type="submit" class="btn" style="padding:8px 16px;">Save Product</button> </form></div></details> <hr style="margin:20px 0;"> <details class="admin-section-box" id="ordersBox" data-section-key="orders"><summary>📦 Manage Orders</summary><div class="admin-section-body"><h3 id="ordersSec">Manage Orders</h3> <div style="max-height:400px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px; margin-bottom:20px;"> ${ordersHTML.length ? ordersHTML : '<p style="color:#777;">No orders found.</p>'} </div></div></details> <hr style="margin:20px 0;"> <details class="admin-section-box" id="usersBox" data-section-key="users"><summary>👥 Manage Users & COD</summary><div class="admin-section-body"><h3 id="usersSec">Manage Users & COD Restrictions</h3> <div style="max-height:300px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px; margin-bottom:20px;"> ${usersHTML.length ? usersHTML : '<p style="color:#777;">No users found.</p>'} </div></div></details> <hr style="margin:20px 0;"><details class="admin-section-box" id="qaBox" data-section-key="qa"><summary>💬 Q&A & Customer Messages</summary><div class="admin-section-body"><h3 id="messageSendSec">📨 Send Product Message</h3><div style="background:#fff;padding:14px;border:1px solid #eee;border-radius:12px;margin-bottom:15px;"><form action="/admin/send-message" method="POST" style="display:grid;gap:8px;"><label style="font-size:13px;font-weight:600;">Customers</label><div style="border:1px solid #ddd;border-radius:8px;padding:8px;max-height:180px;overflow:auto;background:#fafafa;"><label style="display:block;font-size:12px;margin-bottom:6px;font-weight:700;"><input type="checkbox" id="sendMsgAllCustomers" onchange="toggleSendMsgCustomers(this)"> All Customers</label>${users.filter(u=>u.role==='user' || (u.role==='subadmin' && u.subAdminStatus!=='active')).map(u=>`<label style="display:block;font-size:12px;margin:4px 0;"><input type="checkbox" name="userEmails" value="${u.email}" class="sendMsgCustomer"> ${u.name||u.email} — ${u.email}</label>`).join('')}</div><label style="font-size:13px;font-weight:600;">Product</label><select name="productId" required style="padding:9px;border:1px solid #ccc;border-radius:7px;"><option value="">Select Product</option>${products.map(p=>`<option value="${p._id}">${p.name} — ৳${p.price}</option>`).join('')}</select><textarea name="message" required maxlength=3000 placeholder="Product সম্পর্কে customer-কে message লিখুন..." style="min-height:80px;padding:9px;border:1px solid #ccc;border-radius:7px;"></textarea><button class="btn" type="submit">📨 Send Message</button></form></div><script>function toggleSendMsgCustomers(cb){document.querySelectorAll('.sendMsgCustomer').forEach(x=>x.checked=cb.checked);} </script> <h3 id="chatsSec">Customer Q&A Inbox</h3> <div style="max-height:300px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px; margin-bottom:20px;"> ${chatsHTML.length ? chatsHTML : '<p style="color:#777;">No chats found.</p>'} </div> <hr style="margin:20px 0;"> </div></details> <hr style="margin:20px 0;"> <details class="admin-section-box" id="couponsBox" data-section-key="coupons"><summary>🏷️ Manage Coupons</summary><div class="admin-section-body"><h3 id="couponsSec">Manage Coupons</h3> <form action="/admin/add-coupon" method="POST" style="background:#f9f9f9; padding:15px; border-radius:6px; margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;"> <input type="text" name="code" placeholder="Coupon Code" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px;" required> <input type="number" name="discountAmount" placeholder="Discount Amount (৳)" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px;" required> <button type="submit" class="btn" style="padding:8px 16px;">Add Coupon</button> </form> <div style="background:#f9f9f9; padding:10px; border-radius:6px; margin-bottom:20px;"> ${couponsHTML.length ? couponsHTML : '<p style="color:#777;">No coupons found.</p>'} </div> </div></details> <hr style="margin:20px 0;"> <details class="admin-section-box" id="facebookBox" data-section-key="facebook"><summary>📘 Facebook Page / Video / Image / Reel</summary><div class="admin-section-body"><h3 id="facebookSec">📘 Facebook Page / Video / Image / Reel</h3>
 <div style="background:#f9f9f9; padding:15px; border-radius:6px; margin-bottom:20px; border:1px solid #eee;">
 <p style="font-size:13px; color:#555; margin-top:0;">Facebook Page ID ও Page Access Token নিচের Settings-এ একবার Save করুন। এরপর এখান থেকে ছবি, ভিডিও বা Reel সরাসরি আপনার Facebook Page-এ publish করা যাবে।</p>
 <form action="/admin/publish-facebook" method="POST" enctype="multipart/form-data">
@@ -1505,7 +1689,7 @@ ${products.map(p => `<div class="fb-product-option" data-id="${p._id}" onclick="
 <small style="display:block;color:#777;margin-bottom:10px;">Reel-এর জন্য Meta-এর নির্ধারিত Reel video requirements পূরণ করতে হবে।</small>
 <button type="submit" class="btn" style="padding:9px 16px;">🚀 Publish Directly to Facebook</button>
 </form>
-</div> <hr style="margin:20px 0;"> </div></details> <details class="admin-section-box" id="settingsBox"><summary>🛠️ Site Settings & Payment</summary><div class="admin-section-body"><h3 id="settingsSec">Site Settings & Payment Numbers</h3> <form action="/admin/update-settings" method="POST" style="background:#f9f9f9; padding:15px; border-radius:6px; margin-bottom:20px;"> <label style="font-size:13px;">bKash Number:</label><br> <input type="text" name="bkashNumber" value="${siteSetting.bkashNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br> <label style="font-size:13px;">Nagad Number:</label><br> <input type="text" name="nagadNumber" value="${siteSetting.nagadNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br> <hr style="margin:15px 0; border:0; border-top:1px solid #ddd;"> <h4 style="margin:5px 0 8px 0;">📘 Facebook API Settings</h4> <label style="font-size:13px;">Facebook Page ID:</label><br> <input type="text" name="pageId" value="${siteSetting.pageId || ''}" placeholder="Facebook Page ID" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><br> <label style="font-size:13px;">Facebook Page Access Token:</label><br> <input type="password" name="accessToken" placeholder="নতুন Page Access Token দিলে সেটি Save হবে; খালি রাখলে আগের Token থাকবে" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><small style="display:block;color:#777;margin-bottom:10px;">Token কাউকে দেবেন না। এটি শুধু server-side Facebook API call-এর জন্য ব্যবহৃত হবে।</small> <button type="submit" class="btn" style="padding:8px 16px;">Update Settings</button> </form> </div></details> ${isMainAdmin(req.user) ? `<hr style="margin:20px 0;"><h3 id="subAdminSec">🛡️ Sub Admin Control Center</h3>
+</div> <hr style="margin:20px 0;"> </div></details> <details class="admin-section-box" id="settingsBox" data-section-key="settings"><summary>🛠️ Site Settings & Payment</summary><div class="admin-section-body"><h3 id="settingsSec">Site Settings & Payment Numbers</h3> <form action="/admin/update-settings" method="POST" style="background:#f9f9f9; padding:15px; border-radius:6px; margin-bottom:20px;"> <label style="font-size:13px;">bKash Number:</label><br> <input type="text" name="bkashNumber" value="${siteSetting.bkashNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br> <label style="font-size:13px;">Nagad Number:</label><br> <input type="text" name="nagadNumber" value="${siteSetting.nagadNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br> <hr style="margin:15px 0; border:0; border-top:1px solid #ddd;"> <h4 style="margin:5px 0 8px 0;">📘 Facebook API Settings</h4> <label style="font-size:13px;">Facebook Page ID:</label><br> <input type="text" name="pageId" value="${siteSetting.pageId || ''}" placeholder="Facebook Page ID" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><br> <label style="font-size:13px;">Facebook Page Access Token:</label><br> <input type="password" name="accessToken" placeholder="নতুন Page Access Token দিলে সেটি Save হবে; খালি রাখলে আগের Token থাকবে" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><small style="display:block;color:#777;margin-bottom:10px;">Token কাউকে দেবেন না। এটি শুধু server-side Facebook API call-এর জন্য ব্যবহৃত হবে।</small> <button type="submit" class="btn" style="padding:8px 16px;">Update Settings</button> </form> </div></details> ${isMainAdmin(req.user) ? `<details class="admin-section-box" id="subAdminBox" data-section-key="subAdmin"><summary>🛡️ Sub Admin Control Center</summary><div class="admin-section-body"><h3 id="subAdminSec">🛡️ Sub Admin Control Center</h3>
 <div class="sub-admin-control-center" style="background:linear-gradient(135deg,#fff,#f7f9fc);padding:14px;border:1px solid #e5e7eb;border-radius:14px;margin-bottom:20px;box-shadow:0 3px 12px rgba(0,0,0,.05);">
 <style>
 .sub-admin-box-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:14px}
@@ -1539,12 +1723,12 @@ ${activeSubAdminBusiness.map(sa=>`<div class="sub-admin-account"><details><summa
 <details class="sub-admin-box" id="controlSubAdmins">
 <summary style="background:#eef5ff"><span style="font-size:25px">🎛️</span><span>Admin Control<br><span style="font-size:12px;color:#356">সব Sub Admin-এর তথ্য ও control: Approve • Block • Suspend • Warn</span></span></summary>
 <div class="sub-admin-box-body">
-${(await User.find({role:'subadmin'}).sort({_id:-1})).map(sa=>{ const expired=!sa.unlimitedFree && sa.activationExpiresAt && new Date(sa.activationExpiresAt)<new Date(); const days=sa.unlimitedFree?'Unlimited':sa.activationExpiresAt?Math.max(0,Math.ceil((new Date(sa.activationExpiresAt)-Date.now())/86400000))+' days':'Not set'; return `<div class="sub-admin-account"><details><summary>${sa.name||'No Name'} <span class="sub-admin-mini">(${sa.email}) — ${sa.subAdminStatus}</span></summary><div class="sub-admin-mini">Shop: ${sa.subAdminShopName||'N/A'} | Phone: ${sa.phone||'N/A'} | WhatsApp: ${sa.subAdminWhatsApp||'N/A'}<br>Address: ${sa.address||'N/A'}<br>Business Categories: ${(Array.isArray(sa.subAdminBusinessCategories)&&sa.subAdminBusinessCategories.length?sa.subAdminBusinessCategories.join(', '):'N/A')}<br>Plan: ${sa.activationPlan||'N/A'} | Remaining: ${days}${expired?' | ⚠️ Expired':''}</div><div class="sub-admin-account-actions">${getWhatsAppContactUrl(sa.subAdminWhatsApp)?`<a class="btn" href="${getWhatsAppContactUrl(sa.subAdminWhatsApp)}" target="_blank" rel="noopener noreferrer" style="padding:5px 8px;background:#25D366;color:#fff;text-decoration:none;">💬 WhatsApp</a>`:`<span style="padding:5px 8px;background:#eee;color:#777;border-radius:4px;font-size:12px;">WhatsApp যাচাই প্রয়োজন</span>`}<form action="/admin/subadmin/action/${sa._id}" method="POST" style="display:flex;gap:4px;"><input type="number" name="days" value="30" min="1" style="width:60px;padding:5px"><input type="hidden" name="action" value="approve"><button class="btn" style="padding:5px 8px;background:#28a745">Approve/Extend</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST"><input type="hidden" name="action" value="free-unlimited"><button class="btn" style="padding:5px 8px;background:#6f42c1">Free Unlimited</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST" style="display:flex;gap:4px"><input type="number" name="days" value="30" min="1" style="width:60px;padding:5px"><input type="hidden" name="action" value="free-days"><button class="btn" style="padding:5px 8px;background:#20c997">Free Days</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST"><input type="hidden" name="action" value="reject"><button class="btn" style="padding:5px 8px;background:#343a40">Reject</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST"><input type="hidden" name="action" value="suspend"><button class="btn" style="padding:5px 8px;background:#dc3545">Suspend</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST"><input type="hidden" name="action" value="expire"><button class="btn" style="padding:5px 8px;background:#6c757d">Expire</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST" style="display:flex;gap:4px;flex:1;min-width:220px;"><input type="hidden" name="action" value="warn"><input type="text" name="message" placeholder="Warning / Notice message" style="flex:1;padding:5px" required><button class="btn" style="padding:5px 8px;background:#f0ad4e">Send Warning</button></form><form action="/admin/subadmin/message/${sa._id}" method="POST" style="display:flex;gap:4px;flex:1;min-width:220px;"><input type="text" name="message" placeholder="Message to Sub Admin" required style="flex:1;padding:5px"><button class="btn" style="padding:5px 8px;background:#007bff;color:#fff">📨 Send Message</button></form></div></details></div>`;}).join('')||'<div class="sub-admin-empty">কোনো Sub Admin account নেই।</div>'}
+${(await User.find({role:'subadmin'}).sort({_id:-1})).map(sa=>{ const expired=!sa.unlimitedFree && sa.activationExpiresAt && new Date(sa.activationExpiresAt)<new Date(); const days=sa.unlimitedFree?'Unlimited':sa.activationExpiresAt?Math.max(0,Math.ceil((new Date(sa.activationExpiresAt)-Date.now())/86400000))+' days':'Not set'; return `<div class="sub-admin-account"><details><summary>${sa.name||'No Name'} <span class="sub-admin-mini">(${sa.email}) — ${sa.subAdminStatus}</span></summary><div class="sub-admin-mini">Shop: ${sa.subAdminShopName||'N/A'} | Phone: ${sa.phone||'N/A'} | WhatsApp: ${sa.subAdminWhatsApp||'N/A'}<br>Address: ${sa.address||'N/A'}<br>Business Categories: ${(Array.isArray(sa.subAdminBusinessCategories)&&sa.subAdminBusinessCategories.length?sa.subAdminBusinessCategories.join(', '):'N/A')}<br>Plan: ${sa.activationPlan||'N/A'} | Remaining: ${days}${expired?' | ⚠️ Expired':''}</div><div class="sub-admin-account-actions">${getWhatsAppContactUrl(sa.subAdminWhatsApp)?`<a class="btn" href="${getWhatsAppContactUrl(sa.subAdminWhatsApp)}" target="_blank" rel="noopener noreferrer" style="padding:5px 8px;background:#25D366;color:#fff;text-decoration:none;">💬 WhatsApp</a>`:`<span style="padding:5px 8px;background:#eee;color:#777;border-radius:4px;font-size:12px;">WhatsApp যাচাই প্রয়োজন</span>`}<form action="/admin/subadmin/action/${sa._id}" method="POST" style="display:flex;gap:4px;"><input type="number" name="days" value="30" min="1" style="width:60px;padding:5px"><input type="hidden" name="action" value="approve"><button class="btn" style="padding:5px 8px;background:#28a745">Approve/Extend</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST"><input type="hidden" name="action" value="free-unlimited"><button class="btn" style="padding:5px 8px;background:#6f42c1">Free Unlimited</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST" style="display:flex;gap:4px"><input type="number" name="days" value="30" min="1" style="width:60px;padding:5px"><input type="hidden" name="action" value="free-days"><button class="btn" style="padding:5px 8px;background:#20c997">Free Days</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST"><input type="hidden" name="action" value="reject"><button class="btn" style="padding:5px 8px;background:#343a40">Reject</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST"><input type="hidden" name="action" value="suspend"><button class="btn" style="padding:5px 8px;background:#dc3545">Suspend</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST"><input type="hidden" name="action" value="expire"><button class="btn" style="padding:5px 8px;background:#6c757d">Expire</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST" style="display:flex;gap:4px;flex:1;min-width:220px;"><input type="hidden" name="action" value="warn"><input type="text" name="message" placeholder="Warning / Notice message" style="flex:1;padding:5px" required><button class="btn" style="padding:5px 8px;background:#f0ad4e">Send Warning</button></form><form action="/admin/subadmin/message/${sa._id}" method="POST" style="display:flex;gap:4px;flex:1;min-width:220px;"><input type="text" name="message" placeholder="Message to Sub Admin" required style="flex:1;padding:5px"><button class="btn" style="padding:5px 8px;background:#007bff;color:#fff">📨 Send Message</button></form><form action="/admin/subadmin/permissions/${sa._id}" method="POST" style="margin-top:8px;flex-basis:100%;background:#f8fafc;border:1px solid #e6e9ed;border-radius:8px;padding:8px;"><b style="font-size:12px;display:block;">Assigned Sections</b><div class="admin-permission-list">${ADMIN_SECTION_KEYS.map(k=>`<label><input type="checkbox" name="sections" value="${k}" ${(Array.isArray(sa.adminSections)&&sa.adminSections.includes(k))?'checked':''}> ${k}</label>`).join('')}</div><button class="btn" style="margin-top:7px;padding:5px 9px;background:#6c757d;">💾 Save Section Access</button></form></div></details></div>`;}).join('')||'<div class="sub-admin-empty">কোনো Sub Admin account নেই।</div>'}
 <div style="margin-top:12px;padding:10px;background:#fff;border:1px solid #ddd;border-radius:8px;"><b>🆘 Sub Admin Help Requests</b>${(await SubAdminSupport.find().sort({_id:-1}).limit(50)).map(sm=>`<div style="margin-top:8px;padding:8px;background:#f9f9f9;border-radius:5px;"><b>${sm.subAdminEmail}</b><br><span style="font-size:12px;">${sm.message}</span>${sm.requestedWhatsApp?`<div style="margin-top:5px;color:#0b63ce;"><b>Requested New WhatsApp:</b> ${sm.requestedWhatsApp}</div>`:''}${sm.reply?`<div style="margin-top:5px;color:#087f23;"><b>Your Reply:</b> ${sm.reply}</div>`:''}<form action="/admin/subadmin/support/${sm._id}" method="POST" style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;"><input type="text" name="reply" value="${sm.reply||''}" placeholder="Reply to Sub Admin" style="flex:1;padding:6px;min-width:180px;"><button class="btn" style="padding:5px 9px;">Reply</button></form>${sm.requestedWhatsApp?`<form action="/admin/subadmin/update-whatsapp/${sm.subAdminId}" method="POST" style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;"><input type="text" name="whatsapp" value="${sm.requestedWhatsApp||''}" required style="flex:1;padding:6px;min-width:180px;"><button class="btn" style="padding:5px 9px;background:#25D366;color:#fff;">✅ Verify & Update WhatsApp</button></form>`:''}</div>`).join('')||'<p style="color:#777">No help requests.</p>'}</div>
 <div style="margin-top:12px;padding:10px;background:#fff5f5;border:1px solid #ffd1d1;border-radius:8px;"><b>🔑 Password Reset Requests</b>${(await SubAdminSupport.find({requestType:'login_password_reset'}).sort({_id:-1}).limit(50)).map(sm=>`<div style="margin-top:8px;padding:8px;background:#fff;border-radius:5px;border:1px solid #eee;"><b>${sm.subAdminEmail}</b><br><span style="font-size:12px;white-space:pre-wrap;">${sm.message}</span><br><span style="font-size:12px;color:#666;">Status: ${sm.resetStatus}</span>${sm.resetStatus!=='completed'?`<form action="/admin/login-help/reset/${sm._id}" method="POST" style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;"><input type="password" name="newPassword" minlength="6" required placeholder="নতুন Password সেট করুন" style="flex:1;padding:6px;min-width:180px;"><button class="btn" style="padding:5px 9px;background:#28a745;">✅ Reset Password</button></form>`:''}</div>`).join('')||'<p style="color:#777">No password reset requests.</p>'}</div>
 </div></details>
-</div></div>` : ''} 
-<hr style="margin:20px 0;">
+</div></div></details>` : ''} 
+<details class="admin-section-box" id="productRequestsBox" data-section-key="productRequests"><summary>🔎 Customer Product Requests</summary><div class="admin-section-body">
 <h3 id="productRequestsSec">🔎 Customer Product Requests</h3>
 <div style="background:#fff8f2;border:1px solid #ffd2b8;border-radius:12px;padding:12px;margin-bottom:15px;">
 <p style="font-size:12px;color:#666;margin-top:0;">Customer যে পণ্য খুঁজে পাচ্ছেন না তার request এখানে দেখুন। Main Admin চাইলে সব Sub Admin অথবা নির্দিষ্ট Sub Admin-কে পাঠাতে পারবেন। যে Sub Admin আগে Accept করবে, requestটি তার নামে locked হয়ে যাবে।</p>
@@ -1573,7 +1757,7 @@ ${(() => {
 ${(await ProductRequest.find({targetSubAdminIds:String(req.user._id),status:'broadcasted'}).sort({_id:-1}).limit(50)).map(r=>`<div style="background:#fff;border:1px solid #eee;border-radius:8px;padding:10px;margin:8px 0;"><div style="display:flex;gap:10px;align-items:flex-start;">${r.requestImage?`<img src="${mediaUrl(r.requestImage)}" width="70" height="70" style="object-fit:cover;border-radius:6px;cursor:pointer;" onclick="openImageModal(this.src)">`:''}<div style="flex:1;"><b>${r.productName}</b><br><span style="font-size:12px;">Customer: ${r.userName} | ${r.userPhone}</span><br><span style="font-size:12px;">Address: ${r.userAddress}</span><br><span style="font-size:12px;">${r.details||''}</span><br><form action="/subadmin/product-request/accept/${r._id}" method="POST" style="margin-top:7px;"><button class="btn" style="padding:7px 12px;background:#28a745;">✅ Accept Product Request</button></form></div></div></div>`).join('') || '<p style="color:#777;">আপনার কাছে কোনো নতুন product request নেই।</p>'}
 `}
 </div>
-<hr style="margin:20px 0;"> <h3 id="productsSec">All Products List</h3> <div style="max-height:400px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px;"> ${productsHTML.length ? productsHTML : '<p style="color:#777;">No products found.</p>'} </div> </div> <script>
+<div style="margin-top:14px;"><details class="admin-section-box" id="productsBox" data-section-key="products"><summary>📋 All Products List</summary><div class="admin-section-body"><h3 id="productsSec">All Products List</h3> <div style="max-height:400px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px;"> ${productsHTML.length ? productsHTML : '<p style="color:#777;">No products found.</p>'} </div></div></details></div></div> </div> <script>
 const facebookProductData = ${JSON.stringify(products.map(p => ({ id:String(p._id), name:p.name, price:p.price, stock:p.stock, category:p.category, description:p.description||'', image:mediaUrl(p.mainImage), url:`${SITE_URL_FALLBACK}/product/${p._id}` })))};
 function selectFacebookProduct(id) {
 const p=facebookProductData.find(x=>x.id===String(id));
@@ -1603,6 +1787,30 @@ alert('Product link copied!');
 next(err);
 }
 });
+// ================= Employee / Staff Section Assignment =================
+app.post('/admin/staff/create', async(req,res,next)=>{ try {
+  if(!isMainAdmin(req.user) && !(isSubAdmin(req.user)&&subAdminIsActive(req.user))) return res.status(403).send('Only Main Admin or active Sub Admin can create employees.');
+  const email=normalizeEmail(req.body.email); const name=safeText(req.body.name,120); const password=String(req.body.password||'');
+  if(!email||!name||password.length<6) return res.status(400).send('Name, valid email and password (6+ chars) are required.');
+  if(await User.findOne({email})) return res.status(400).send('এই Email দিয়ে account আগে থেকেই আছে।');
+  const raw=req.body.sections; const requested=Array.isArray(raw)?raw:(raw?[raw]:[]);
+  const parentAllowed=isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[]);
+  const sections=requested.map(String).filter(x=>parentAllowed.includes(x));
+  if(!sections.length) return res.status(400).send('কমপক্ষে একটি assigned section নির্বাচন করুন।');
+  const hash=await bcrypt.hash(password,10);
+  await new User({email,password:hash,role:'staff',name,staffParentAdminId:String(req.user._id),staffStatus:'active',staffAssignedSections:sections,staffCreatedByEmail:normalizeEmail(req.user.email),staffCreatedAt:new Date(),staffPwaSection:sections[0]}).save();
+  res.redirect('/admin-dashboard#staffBox');
+ }catch(e){next(e);} });
+app.post('/admin/staff/permissions/:id', async(req,res,next)=>{ try {
+  if(!isMainAdmin(req.user) && !(isSubAdmin(req.user)&&subAdminIsActive(req.user))) return res.status(403).send('Unauthorized');
+  const st=await User.findOne({_id:req.params.id,role:'staff',staffParentAdminId:String(req.user._id)}); if(!st) return res.status(404).send('Employee not found');
+  const raw=req.body.sections; const requested=Array.isArray(raw)?raw:(raw?[raw]:[]);
+  const parentAllowed=isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[]);
+  const sections=requested.map(String).filter(x=>parentAllowed.includes(x));
+  if(!sections.length) return res.status(400).send('কমপক্ষে একটি assigned section রাখুন।');
+  st.staffAssignedSections=sections; st.staffPwaSection=sections[0]; await st.save(); res.redirect('/admin-dashboard#staffBox');
+ }catch(e){next(e);} });
+
 // ================= Main Admin Sub Admin Control Routes =================
 app.post('/sub-admin/support', async (req,res,next)=>{ try { if(!isSubAdmin(req.user)) return res.redirect('/login'); const message=String(req.body.message||'').trim(); const requestedWhatsApp=String(req.body.requestedWhatsApp||'').trim(); if(!message) return res.redirect('/admin-dashboard'); if(requestedWhatsApp && !isValidWhatsAppContact(requestedWhatsApp)) return res.send(`<script>alert('সঠিক WhatsApp Number / wa.me Link দিন।');window.history.back();</script>`); await new SubAdminSupport({subAdminId:String(req.user._id),subAdminEmail:req.user.email,message,requestedWhatsApp,whatsappUpdateStatus:requestedWhatsApp?'pending':'none'}).save(); res.redirect('/admin-dashboard'); } catch(e){next(e);} });
 app.post('/admin/subadmin/update-whatsapp/:id', async (req,res,next)=>{ try { if(!isMainAdmin(req.user)) return res.status(403).send('Unauthorized: Main Admin access required'); const whatsapp=String(req.body.whatsapp||'').trim(); if(!isValidWhatsAppContact(whatsapp)) return res.status(400).send('Invalid WhatsApp number or wa.me link'); const sa=await User.findOne({_id:req.params.id,role:'subadmin'}); if(!sa) return res.status(404).send('Sub Admin not found'); sa.subAdminWhatsApp=whatsapp; await sa.save(); await SubAdminSupport.updateMany({subAdminId:String(sa._id),requestedWhatsApp:whatsapp,whatsappUpdateStatus:'pending'},{$set:{whatsappUpdateStatus:'approved',updatedAt:new Date()}}); res.redirect('/admin-dashboard#subAdminSec'); } catch(e){next(e);} });
@@ -1781,7 +1989,9 @@ app.post('/subadmin/product-request/accept/:id', async (req,res,next)=>{
 });
 
 // Admin Actions Backend Routes
-app.post('/admin/add-product', upload.fields([{ name: 'mainImage', maxCount: 1 }, { name: 'additionalImages', maxCount: 8 }]), async (req, res, next) => {
+app.post('/admin/subadmin/permissions/:id', async (req,res,next)=>{ try { if(!isMainAdmin(req.user)) return res.status(403).send('Unauthorized: Main Admin access required'); const sa=await User.findOne({_id:req.params.id,role:'subadmin'}); if(!sa) return res.status(404).send('Sub Admin not found'); const raw=req.body.sections; const sections=Array.isArray(raw)?raw:(raw?[raw]:[]); sa.adminSections=sections.filter(x=>ADMIN_SECTION_KEYS.includes(String(x))); await sa.save(); res.redirect('/admin-dashboard#subAdminSec'); } catch(e){next(e);} });
+
+app.post('/admin/add-product', requireAdminSection('addProduct'), upload.fields([{ name: 'mainImage', maxCount: 1 }, { name: 'additionalImages', maxCount: 8 }]), async (req, res, next) => {
 try {
 if (!req.user || !isStaff(req.user) || !subAdminIsActive(req.user)) return res.redirect('/login');
 const productWhatsApp = String(req.body.whatsappContact || '').trim();
@@ -1819,7 +2029,7 @@ description: req.body.description || '',
 mainImage: mainImageFilename,
 additionalImages: additionalImageFilenames,
 whatsappContact: productWhatsApp,
-ownerId: String(req.user._id)
+ownerId: dataOwnerId(req.user)
 }).save();
 res.redirect('/admin-dashboard');
 } catch (err) {
@@ -1830,14 +2040,14 @@ app.get('/admin/delete-product/:id', async (req, res, next) => {
 try {
 if (!req.user || !isMainAdmin(req.user)) return res.status(403).send('শুধু Main Admin Product delete করতে পারবেন।');
 let productToDelete = await Product.findById(req.params.id);
-if (!productToDelete || (!isMainAdmin(req.user) && String(productToDelete.ownerId || '') !== String(req.user._id))) return res.status(403).send('Unauthorized: Main Admin access required');
+if (!productToDelete || (!isMainAdmin(req.user) && String(productToDelete.ownerId || '') !== dataOwnerId(req.user))) return res.status(403).send('Unauthorized: Main Admin access required');
 await Product.findByIdAndDelete(req.params.id);
 res.redirect('/admin-dashboard#productsSec');
 } catch (err) {
 next(err);
 }
 });
-app.post('/admin/update-order-status/:id', async (req, res, next) => {
+app.post('/admin/update-order-status/:id', requireAdminSection('orders'), async (req, res, next) => {
 try {
 if (!req.user || !isStaff(req.user) || !subAdminIsActive(req.user)) return res.redirect('/login');
 let order = await Order.findById(req.params.id);
@@ -1852,7 +2062,7 @@ res.redirect('/admin-dashboard');
 next(err);
 }
 });
-app.get('/admin/toggle-block-user/:id', async (req, res, next) => {
+app.get('/admin/toggle-block-user/:id', requireAdminSection('users'), async (req, res, next) => {
 try {
 if (!req.user || !isStaff(req.user) || !subAdminIsActive(req.user)) return res.redirect('/login');
 let targetUser = await User.findById(req.params.id);
@@ -1867,7 +2077,7 @@ res.redirect('/admin-dashboard');
 next(err);
 }
 });
-app.post('/admin/delete-order/:id', async (req, res, next) => {
+app.post('/admin/delete-order/:id', requireAdminSection('orders'), async (req, res, next) => {
 try {
 if (!req.user || !isMainAdmin(req.user)) return res.status(403).send('শুধু Main Admin Order delete করতে পারবেন।');
 let orderToDelete = await Order.findById(req.params.id);
@@ -1878,18 +2088,18 @@ res.redirect('/admin-dashboard');
 next(err);
 }
 });
-app.post('/admin/delete-chat/:id', async (req, res, next) => {
+app.post('/admin/delete-chat/:id', requireAdminSection('qa'), async (req, res, next) => {
 try {
 if (!req.user || !isMainAdmin(req.user)) return res.status(403).send('শুধু Main Admin Chat delete করতে পারবেন।');
 let chatToDelete = await Chat.findById(req.params.id);
-if (!chatToDelete || (!isMainAdmin(req.user) && String(chatToDelete.ownerId || '') !== String(req.user._id))) return res.status(403).send('Unauthorized: Main Admin access required');
+if (!chatToDelete || (!isMainAdmin(req.user) && String(chatToDelete.ownerId || '') !== dataOwnerId(req.user))) return res.status(403).send('Unauthorized: Main Admin access required');
 await Chat.findByIdAndDelete(req.params.id);
 res.redirect('/admin-dashboard');
 } catch (err) {
 next(err);
 }
 });
-app.post('/admin/send-message', async (req, res, next) => {
+app.post('/admin/send-message', requireAdminSection('qa'), async (req, res, next) => {
 try {
 if (!req.user || !isStaff(req.user) || !subAdminIsActive(req.user)) return res.redirect('/login');
 const rawRecipients = Array.isArray(req.body.userEmails) ? req.body.userEmails : [req.body.userEmails || req.body.userEmail];
@@ -1899,16 +2109,16 @@ const message = safeText(req.body.message, 3000);
 if (!recipientEmails.length || !productId || !message) return res.send(`<script>alert('কমপক্ষে একজন Customer, Product এবং Message নির্বাচন করুন।'); window.history.back();</script>`);
 const product = await Product.findById(productId).lean();
 if (!product) return res.status(404).send('Product not found');
-if (!isMainAdmin(req.user) && String(product.ownerId || '') !== String(req.user._id)) return res.status(403).send('Unauthorized: Main Admin access required');
+if (!isMainAdmin(req.user) && String(product.ownerId || '') !== dataOwnerId(req.user)) return res.status(403).send('Unauthorized: Main Admin access required');
 for (const recipientEmail of recipientEmails) { await new Chat({ productId: product._id, productName: product.name, ownerId:String(product.ownerId||req.user._id), productImage:product.mainImage||'', userEmail:recipientEmail, message, reply:'', senderRole:req.user.role, senderEmail:req.user.email, recipientEmail, isRead:false }).save(); await createNotification(recipientEmail,'New Product Message',`${product.name} সম্পর্কে নতুন message এসেছে।`,'/messages','message'); }
 res.redirect('/admin-dashboard#chatsSec');
 } catch(e){ next(e); }
 });
-app.post('/admin/reply-chat/:id', async (req, res, next) => {
+app.post('/admin/reply-chat/:id', requireAdminSection('qa'), async (req, res, next) => {
 try {
 if (!req.user || !isStaff(req.user) || !subAdminIsActive(req.user)) return res.redirect('/login');
 let chatToReply = await Chat.findById(req.params.id);
-if (!chatToReply || (!isMainAdmin(req.user) && String(chatToReply.ownerId || '') !== String(req.user._id))) return res.status(403).send('Unauthorized: Main Admin access required');
+if (!chatToReply || (!isMainAdmin(req.user) && String(chatToReply.ownerId || '') !== dataOwnerId(req.user))) return res.status(403).send('Unauthorized: Main Admin access required');
 const reply = safeText(req.body.reply, 3000);
 chatToReply.reply = reply;
 chatToReply.isRead = true;
@@ -1921,7 +2131,7 @@ res.redirect('/admin-dashboard#chatsSec');
 next(err);
 }
 });
-app.post('/admin/add-coupon', async (req, res, next) => {
+app.post('/admin/add-coupon', requireAdminSection('coupons'), async (req, res, next) => {
 try {
 if (!req.user || !isStaff(req.user) || !subAdminIsActive(req.user)) return res.redirect('/login');
 const { code, discountAmount } = req.body;
@@ -1931,11 +2141,11 @@ res.redirect('/admin-dashboard');
 next(err);
 }
 });
-app.get('/admin/delete-coupon/:id', async (req, res, next) => {
+app.get('/admin/delete-coupon/:id', requireAdminSection('coupons'), async (req, res, next) => {
 try {
 if (!req.user || !isMainAdmin(req.user)) return res.status(403).send('শুধু Main Admin Coupon delete করতে পারবেন।');
 let couponToDelete = await Coupon.findById(req.params.id);
-if (!couponToDelete || (!isMainAdmin(req.user) && String(couponToDelete.ownerId || '') !== String(req.user._id))) return res.status(403).send('Unauthorized: Main Admin access required');
+if (!couponToDelete || (!isMainAdmin(req.user) && String(couponToDelete.ownerId || '') !== dataOwnerId(req.user))) return res.status(403).send('Unauthorized: Main Admin access required');
 await Coupon.findByIdAndDelete(req.params.id);
 res.redirect('/admin-dashboard');
 } catch (err) {
@@ -1944,10 +2154,10 @@ next(err);
 });
 
 // ================= Direct Facebook Publishing =================
-app.post('/admin/publish-facebook', upload.single('mediaFile'), async (req, res, next) => {
+app.post('/admin/publish-facebook', requireAdminSection('facebook'), upload.single('mediaFile'), async (req, res, next) => {
 try {
 if (!req.user || !isStaff(req.user) || !subAdminIsActive(req.user)) return res.redirect('/login');
-const setting = isMainAdmin(req.user) ? await SiteSetting.findOne() : await SiteSetting.findOne({ ownerId: String(req.user._id) });
+const setting = isMainAdmin(req.user) ? await SiteSetting.findOne() : await SiteSetting.findOne({ ownerId: dataOwnerId(req.user) });
 if (!setting || !setting.pageId || !setting.accessToken) {
 return res.status(400).send(`<script>alert('Facebook Page ID এবং Page Access Token আগে Admin Settings-এ Save করুন।'); window.location.href='/admin-dashboard#facebookSec';</script>`);
 }
@@ -1963,7 +2173,7 @@ let product = null;
 if (req.body.productId) {
 product = await Product.findById(req.body.productId).lean();
 if (!product) return res.status(400).send('Selected product not found.');
-if (!isMainAdmin(req.user) && String(product.ownerId || '') !== String(req.user._id)) return res.status(403).send('Unauthorized: Main Admin access required');
+if (!isMainAdmin(req.user) && String(product.ownerId || '') !== dataOwnerId(req.user)) return res.status(403).send('Unauthorized: Main Admin access required');
 productLink = `${SITE_URL_FALLBACK}/product/${product._id}`;
 }
 
@@ -1992,7 +2202,7 @@ mediaType: mediaType === 'reel' ? 'video' : mediaType,
 productLink,
 facebookPostId: fbResult.id || fbResult.video_id || '',
 facebookPublished: true,
-ownerId: String(req.user._id)
+ownerId: dataOwnerId(req.user)
 }).save();
 
 res.send(`<script>alert('Facebook-এ ${mediaType === 'image' ? 'ছবি' : mediaType === 'reel' ? 'Reel' : 'ভিডিও'} সফলভাবে publish হয়েছে।'); window.location.href='/admin-dashboard#facebookSec';</script>`);
@@ -2002,17 +2212,17 @@ res.status(500).send(`<div style="font-family:Arial;padding:20px"><h3>Facebook p
 }
 });
 
-app.post('/admin/update-settings', async (req, res, next) => {
+app.post('/admin/update-settings', requireAdminSection('settings'), async (req, res, next) => {
 try {
 if (!req.user || !isStaff(req.user) || !subAdminIsActive(req.user)) return res.redirect('/login');
 const { bkashNumber, nagadNumber, pageId, accessToken } = req.body;
-let setting = isMainAdmin(req.user) ? await SiteSetting.findOne() : await SiteSetting.findOne({ ownerId: String(req.user._id) });
+let setting = isMainAdmin(req.user) ? await SiteSetting.findOne() : await SiteSetting.findOne({ ownerId: dataOwnerId(req.user) });
 if (setting) {
 setting.bkashNumber = bkashNumber;
 setting.nagadNumber = nagadNumber;
 if (pageId !== undefined) setting.pageId = String(pageId || '').trim();
 if (accessToken && String(accessToken).trim()) setting.accessToken = String(accessToken).trim();
-if (!isMainAdmin(req.user)) setting.ownerId = String(req.user._id);
+if (!isMainAdmin(req.user)) setting.ownerId = dataOwnerId(req.user);
 await setting.save();
 } else {
 await new SiteSetting({
@@ -2020,7 +2230,7 @@ bkashNumber,
 nagadNumber,
 pageId: String(pageId || '').trim(),
 accessToken: String(accessToken || '').trim(),
-ownerId: String(req.user._id)
+ownerId: dataOwnerId(req.user)
 }).save();
 }
 res.redirect('/admin-dashboard');
