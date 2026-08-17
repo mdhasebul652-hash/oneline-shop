@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const cookieParser = require('cookie-parser');
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
+const axios = require('axios');
 cloudinary.config({
 cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
 api_key: process.env.CLOUDINARY_API_KEY,
@@ -13,6 +14,8 @@ api_secret: process.env.CLOUDINARY_API_SECRET
 });
 const bcrypt = require('bcryptjs');
 const path = require('path');
+const TIKTOK_CLIENT_KEY = process.env.aw24p840xwrdlys;
+const TIKTOK_SECRET = process.env.XZPkFIFikPu04DZIu5x3Q4MYRbLZy4D;
 const fs = require('fs');
 const crypto = require('crypto');
 const app = express();
@@ -768,6 +771,42 @@ res.send(` <!DOCTYPE html> <html> <head><title>Search: ${keyword}</title>${globa
 next(err);
 }
 });
+// ==================== TikTok Authentication Routes ====================
+
+// ১. সাব-অ্যাডমিনকে টিকটক লগইন পেজে রিডাইরেক্ট করার রাউট
+app.get('/auth/tiktok', (req, res) => {
+    const REDIRECT_URI = 'https://oneline-shop.onrender.com/auth/tiktok/callback';
+    const tiktokAuthUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${TIKTOK_CLIENT_KEY}&scope=user.info.basic,video.upload&response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
+    res.redirect(tiktokAuthUrl);
+});
+
+// ২. টিকটক থেকে ফিরে আসার পর কোড প্রসেস করার রাউট
+app.get('/auth/tiktok/callback', async (req, res) => {
+    const { code } = req.query;
+    const REDIRECT_URI = 'https://oneline-shop.onrender.com/auth/tiktok/callback';
+
+    try {
+        const tokenResponse = await axios.post('https://open.tiktokapis.com/v2/oauth/token/', {
+            client_key: TIKTOK_CLIENT_KEY,
+            client_secret: TIKTOK_SECRET,
+            code: code,
+            grant_type: 'authorization_code',
+            redirect_uri: REDIRECT_URI
+        }, {
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const accessToken = tokenResponse.data.data.access_token;
+        
+        // এখানে আপনি accessToken টি ডাটাবেজে আপনার সাব-অ্যাডমিনের অ্যাকাউন্টের সাথে সেভ করবেন
+        // এরপর ব্যবহারকারীকে ড্যাশবোর্ডে ফিরিয়ে নেবেন
+        res.send("TikTok account connected successfully! You can go back to the app.");
+    } catch (error) {
+        console.error("TikTok Token Error:", error.response?.data || error.message);
+        res.status(500).send("TikTok Authentication Failed");
+    }
+});
+
 // Product Details Page
 app.get('/product/:id', async (req, res, next) => {
 try {
