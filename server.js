@@ -1293,7 +1293,21 @@ app.post('/api/product-request', upload.single('requestImage'), async (req,res,n
 app.get('/api/product-requests', async (req,res,next) => {
   try {
     if (!req.user || !isStaff(req.user) || !subAdminIsActive(req.user)) return res.status(403).json({error:'Unauthorized'});
-    const filter = isMainAdmin(req.user) ? {} : { targetSubAdminIds:String(req.user._id) };
+    let filter = {};
+    if (isMainAdmin(req.user)) {
+      filter = {};
+    } else if (isEmployee(req.user)) {
+      const parentId = dataOwnerId(req.user);
+      const parent = await User.findById(parentId).select('role').lean();
+      // Assigned Product-Request employees can work the same operational queue as
+      // Main Admin: all fresh/new requests plus requests already broadcast to
+      // their parent seller. Accepted/closed requests are intentionally excluded.
+      filter = parent && parent.role === 'subadmin'
+        ? { $or:[ {status:'new'}, {status:'broadcasted', targetSubAdminIds:String(parentId)} ] }
+        : { status: { $in:['new','broadcasted'] } };
+    } else {
+      filter = { targetSubAdminIds:String(req.user._id) };
+    }
     const rows = await ProductRequest.find(filter).sort({_id:-1}).limit(200).lean();
     res.json(rows.map(r=>({...r,requestImage:mediaUrl(r.requestImage)})));
   } catch(e){ next(e); }
@@ -1603,11 +1617,19 @@ let productRequestRows;
 if (isMainAdmin(req.user)) {
   productRequestRows = await ProductRequest.find().sort({_id:-1}).limit(50).lean();
 } else if (isEmployee(req.user)) {
-  const parent = await User.findById(dataOwnerId(req.user)).select('role').lean();
+  const parentId = dataOwnerId(req.user);
+  const parent = await User.findById(parentId).select('role').lean();
+  // Employee with Product Requests gets the complete operational queue: fresh
+  // customer requests plus requests already broadcast to the employee's parent seller.
   if (parent && parent.role === 'subadmin') {
-    productRequestRows = await ProductRequest.find({ targetSubAdminIds: String(parent._id), status: 'broadcasted' }).sort({_id:-1}).limit(50).lean();
+    productRequestRows = await ProductRequest.find({
+      $or:[
+        {status:'new'},
+        {status:'broadcasted', targetSubAdminIds:String(parentId)}
+      ]
+    }).sort({_id:-1}).limit(100).lean();
   } else {
-    productRequestRows = await ProductRequest.find({ status: 'broadcasted' }).sort({_id:-1}).limit(50).lean();
+    productRequestRows = await ProductRequest.find({status:{$in:['new','broadcasted']}}).sort({_id:-1}).limit(100).lean();
   }
 } else {
   productRequestRows = await ProductRequest.find({ targetSubAdminIds: String(req.user._id), status: 'broadcasted' }).sort({_id:-1}).limit(50).lean();
@@ -1790,7 +1812,7 @@ ${(() => {
 }).join('') || '<p style="color:#777;">কোনো customer request নেই।</p>';
 })()}
 ` : `
-${productRequestRows.map(r=>`<div style="background:#fff;border:1px solid #eee;border-radius:8px;padding:10px;margin:8px 0;"><div style="display:flex;gap:10px;align-items:flex-start;">${r.requestImage?`<img src="${mediaUrl(r.requestImage)}" width="70" height="70" style="object-fit:cover;border-radius:6px;cursor:pointer;" onclick="openImageModal(this.src)">`:''}<div style="flex:1;"><b>${r.productName}</b><br><span style="font-size:12px;">Customer: ${r.userName} | ${r.userPhone}</span><br><span style="font-size:12px;">Address: ${r.userAddress}</span><br><span style="font-size:12px;">${r.details||''}</span><br><form action="/subadmin/product-request/accept/${r._id}" method="POST" style="margin-top:7px;"><button class="btn" style="padding:7px 12px;background:#28a745;">✅ Accept Product Request</button></form></div></div></div>`).join('') || '<p style="color:#777;">আপনার কাছে কোনো নতুন product request নেই।</p>'}
+${productRequestRows.map(r=>{ const statusLabel=r.status==='accepted'?`Accepted by ${r.acceptedByEmail||'Admin'}`:r.status; return `<div style="background:#fff;border:1px solid #eee;border-radius:8px;padding:10px;margin:8px 0;"><div style="display:flex;gap:10px;align-items:flex-start;">${r.requestImage?`<img src="${mediaUrl(r.requestImage)}" width="70" height="70" style="object-fit:cover;border-radius:6px;cursor:pointer;" onclick="openImageModal(this.src)">`:''}<div style="flex:1;"><b>${r.productName}</b><br><span style="font-size:12px;">Customer: ${r.userName} | ${r.userPhone}</span><br><span style="font-size:12px;">Address: ${r.userAddress}</span><br><span style="font-size:12px;">${r.details||''}</span><br><span style="font-size:12px;color:#007bff;">Status: ${statusLabel}</span>${r.status!=='accepted' && r.status!=='closed' ? `<form action="/staff/product-request/forward/${r._id}" method="POST" style="margin-top:7px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:5px;">কোন Admin-কে পাঠাবেন?</label><div style="max-height:120px;overflow:auto;border:1px solid #ddd;padding:6px;border-radius:6px;background:#fafafa;"><label style="display:block;font-size:12px;margin-bottom:5px;font-weight:700;"><input type="checkbox" name="broadcastAll" value="1" onchange="toggleStaffRequestAdmins(this, '${r._id}')"> সব Active Admin-কে পাঠান</label>${activeSubAdmins.map(sa=>`<label style="display:block;font-size:12px;"><input type="checkbox" name="subAdminIds" value="${sa._id}" class="staffRequestAdmin-${r._id}"> ${sa.name||sa.email} — ${sa.email}</label>`).join('')}</div><button class="btn" style="margin-top:6px;padding:7px 12px;background:#007bff;">📨 Send to Selected Admin(s)</button></form>` : `<div style="margin-top:7px;color:#666;font-size:12px;">এই request ইতিমধ্যে একজন Admin গ্রহণ করেছেন।</div>`}</div></div></div>`;}).join('') || '<p style="color:#777;">আপনার assigned Product Request queue-তে কোনো নতুন request নেই।</p>'}
 `}
 </div>
 <div style="margin-top:14px;"><details class="admin-section-box" id="productsBox" data-section-key="products"><summary>📋 All Products List</summary><div class="admin-section-body"><h3 id="productsSec">All Products List</h3> <div style="max-height:400px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px;"> ${productsHTML.length ? productsHTML : '<p style="color:#777;">No products found.</p>'} </div></div></details></div></div> </div> <script>
@@ -1804,6 +1826,8 @@ hidden.value=p.id; box.style.display='block';
 box.innerHTML='<div style="display:flex;gap:10px;align-items:flex-start;"><img src="'+p.image+'" style="width:90px;height:90px;object-fit:cover;border-radius:6px;border:1px solid #ddd;"><div style="flex:1;"><b style="font-size:15px;">'+p.name+'</b><div style="color:#f85606;font-weight:bold;margin-top:3px;">৳'+p.price+'</div><div style="font-size:12px;color:#555;margin-top:2px;">Stock: '+p.stock+' | Category: '+p.category+'</div><div style="font-size:12px;color:#444;margin-top:5px;">'+(p.description||'Description নেই')+'</div><a href="'+p.url+'" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:7px;color:#007bff;font-size:12px;">🔗 Product খুলুন</a></div></div>';
 document.querySelectorAll('.fb-product-option').forEach(el=>{el.style.borderColor=el.dataset.id===p.id?'#f85606':'#eee';el.style.background=el.dataset.id===p.id?'#fff7f2':'#fff';});
 }
+
+function toggleStaffRequestAdmins(cb,id){document.querySelectorAll('.staffRequestAdmin-'+id).forEach(x=>x.checked=cb.checked);}
 
 async function copyProductLink(id) {
 const input = document.getElementById('productLink-' + id);
@@ -2032,17 +2056,53 @@ app.post('/admin/product-request/broadcast/:id', async (req,res,next)=>{
   } catch(e){next(e);}
 });
 
+app.post('/staff/product-request/forward/:id', requireAdminSection('productRequests'), async (req,res,next)=>{
+  try {
+    if (!isEmployee(req.user)) return res.status(403).send('Employee access required.');
+    const request = await ProductRequest.findOne({_id:req.params.id,status:{$in:['new','broadcasted']}});
+    if (!request) return res.status(404).send('Product Request not available.');
+
+    const broadcastAll = String(req.body.broadcastAll || '') === '1';
+    let ids = [];
+    if (broadcastAll) {
+      ids = (await User.find({role:'subadmin',subAdminStatus:'active'}).select('_id').lean()).map(x=>String(x._id));
+    } else {
+      const raw = req.body.subAdminIds;
+      ids = [...new Set((Array.isArray(raw)?raw:[raw]).filter(Boolean).map(String))];
+      if (ids.length) {
+        ids = (await User.find({role:'subadmin',subAdminStatus:'active',_id:{$in:ids}}).select('_id').lean()).map(x=>String(x._id));
+      }
+    }
+    if (!ids.length) return res.send(`<script>alert('কমপক্ষে একজন Active Admin নির্বাচন করুন।');window.history.back();</script>`);
+
+    request.targetSubAdminIds = ids;
+    request.status = 'broadcasted';
+    await request.save();
+
+    for (const adminId of ids) {
+      const admin = await User.findById(adminId).select('email').lean();
+      if (admin?.email) {
+        await createNotification(normalizeEmail(admin.email),'New Product Request',`${request.productName} সম্পর্কে নতুন customer product request এসেছে।`,'/admin-dashboard?section=productRequests','product-request');
+      }
+    }
+    res.send(`<script>alert('Product Request সফলভাবে নির্বাচিত Admin-দের কাছে পাঠানো হয়েছে। Employee request-টি নিজ নামে lock করেনি।');window.location.href='/admin-dashboard?staff=1&section=productRequests#productRequestsSec';</script>`);
+  } catch(e){ next(e); }
+});
+
 app.post('/subadmin/product-request/accept/:id', async (req,res,next)=>{
   try {
-    const canAccept = isSubAdmin(req.user) && subAdminIsActive(req.user) || (isEmployee(req.user) && subAdminHasSection(req.user,'productRequests'));
-    if (!canAccept) return res.status(403).send('এই Product Request কাজটি আপনার account-এ assigned নয়।');
+    // Employees may view and forward requests, but they never Accept/Lock a request.
+    const canAccept = isSubAdmin(req.user) && subAdminIsActive(req.user);
+    if (!canAccept) return res.status(403).send('Employee Product Request-টি Accept/Lock করতে পারবে না। নির্দিষ্ট Admin-কে বা সব Admin-কে পাঠান।');
     const id = String(req.params.id);
     let targetOwnerId = String(req.user._id);
     if (isEmployee(req.user)) targetOwnerId = dataOwnerId(req.user);
     const parent = await User.findById(targetOwnerId).select('role').lean();
-    const targetMatch = parent && parent.role === 'subadmin' ? {targetSubAdminIds:targetOwnerId} : {};
+    const targetMatch = parent && parent.role === 'subadmin'
+      ? {$or:[{status:'new'},{status:'broadcasted',targetSubAdminIds:targetOwnerId}]}
+      : {status:{$in:['new','broadcasted']}};
     const accepted = await ProductRequest.findOneAndUpdate(
-      {_id:id,status:'broadcasted',...targetMatch},
+      {_id:id,...targetMatch},
       {$set:{status:'accepted',acceptedBy:String(req.user._id),acceptedByEmail:req.user.email,acceptedAt:new Date()}},
       {new:true}
     );
@@ -2051,6 +2111,10 @@ app.post('/subadmin/product-request/accept/:id', async (req,res,next)=>{
     res.send(`<script>alert('Request সফলভাবে Accept করেছেন। Customer-এর সাথে Private Inbox Chat এখন চালু হয়েছে।');window.location.href='/request-inbox';</script>`);
   } catch(e){next(e);}
 });
+
+// ===== V63 EMPLOYEE FULL ASSIGNED-SECTION CONTROL =====
+// Employees get the complete operational actions inside each section assigned by Main/Admin owner.
+// Employees can view Product Requests and forward them to selected/all active Admins, but never Accept/Lock them or create another Employee.
 
 // ===== V60 EMPLOYEE ASSIGNED-WORK COMPLETION FIX =====
 // V60 keeps V59 as the base and makes every assigned operational section fully actionable for employees.
