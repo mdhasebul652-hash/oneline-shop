@@ -1,4 +1,4 @@
-// V67: Sub Admin Control Center search boxes + clear assistant ownership UI.
+// V69: Sub Admin search prioritization + independent 3-column scrolling + cleared reply inputs. Base: V68.
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -477,8 +477,17 @@ const ALL_CATEGORIES = [
 // ================= Global Header & Image Modal Setup =================
 const globalHeaderHTML = ` <link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#f85606"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"> <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"> <style> * { box-sizing: border-box; } body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0 0 65px 0; background: #f4f4f4; color: #222; -webkit-text-size-adjust: 100%; } header { background: #f85606; color: white; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 1000; box-shadow: 0 2px 5px rgba(0,0,0,0.1); width: 100%; } .logo { font-size: 18px; font-weight: bold; text-decoration: none; color: white; white-space: nowrap; display: flex; align-items: center; gap: 5px; } .search-bar { display: flex; flex: 1; max-width: 550px; margin: 0 10px; } .search-bar input { width: 100%; padding: 8px 12px; border: none; border-radius: 4px 0 0 4px; outline: none; font-size: 14px; } .search-bar button { background: #ffe11b; border: none; padding: 0 15px; border-radius: 0 4px 4px 0; cursor: pointer; font-weight: bold; font-size: 14px; color: #333; } .categories-nav { background: white; padding: 10px 15px; display: flex; gap: 10px; overflow-x: auto; box-shadow: 0 2px 4px rgba(0,0,0,0.05); white-space: nowrap; -webkit-overflow-scrolling: touch; position: sticky; top: 55px; z-index: 999; } .categories-nav::-webkit-scrollbar { display: none; } .categories-nav a { text-decoration: none; color: #333; font-size: 13px; font-weight: 500; padding: 6px 12px; background: #f0f0f0; border-radius: 20px; transition: 0.2s; } .categories-nav a:hover { background: #f85606; color: white; } .bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; background: #fff; display: flex; justify-content: space-around; padding: 8px 0; border-top: 1px solid #ddd; z-index: 1000; box-shadow: 0 -2px 5px rgba(0,0,0,0.05); } .bottom-nav a { text-decoration: none; color: #666; font-size: 11px; display: flex; flex-direction: column; align-items: center; text-align: center; font-weight: 500; } .bottom-nav a span { font-size: 18px; margin-bottom: 2px; } .bottom-nav a:hover, .bottom-nav a.active { color: #f85606; } .container { max-width: 1200px; margin: 15px auto; padding: 0 10px; width: 100%; } .product-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; } .product-card { background: white; padding: 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; flex-direction: column; justify-content: space-between; text-decoration: none; color: inherit; transition: transform 0.2s; } .product-card img { width: 100%; height: 160px; object-fit: contain; background: #fff; border-radius: 4px; cursor: pointer; } .product-card h4 { font-size: 14px; color: #222; margin: 8px 0 4px 0; height: 38px; overflow: hidden; line-height: 1.3; font-weight: 600; } .price { color: #f85606; font-size: 16px; font-weight: bold; margin: 4px 0; } .btn { background: #f85606; color: white; border: none; padding: 10px 16px; border-radius: 4px; cursor: pointer; text-decoration: none; text-align: center; display: inline-block; font-size: 14px; font-weight: 600; } .btn-buy { background: #ffe11b; color: #333; font-weight: bold; } @media (min-width: 768px) { .product-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 15px; } .product-card img { height: 190px; } .bottom-nav { display: flex; } body { padding-bottom: 65px; } } </style> <!-- Image Modal CSS for Large Preview --> <div id="imageModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.8); justify-content:center; align-items:center;"> <span onclick="closeImageModal()" style="position:absolute; top:20px; right:30px; color:#fff; font-size:40px; font-weight:bold; cursor:pointer;">&times;</span> <img id="modalImg" style="max-width:90%; max-height:90%; border-radius:6px; box-shadow:0 0 20px rgba(255,255,255,0.3);"> </div> <script> function openImageModal(src) { document.getElementById('modalImg').src = src; document.getElementById('imageModal').style.display = 'flex'; } function closeImageModal() { document.getElementById('imageModal').style.display = 'none'; } </script>  <script>
 (function(){
-  const KEY='onlineShopPreserveScrollY.v2';
+  const KEY='onlineShopPreserveScrollY.v3';
   const pageKey=()=>KEY+'::'+location.pathname;
+  const panelSelector='.sub-admin-box-body';
+  function getPanelScroll(){
+    const out={};
+    document.querySelectorAll(panelSelector).forEach(el=>{
+      const parent=el.closest('.sub-admin-box');
+      if(parent && parent.id) out[parent.id]=Math.max(0,el.scrollTop||0);
+    });
+    return out;
+  }
   function saveScroll(){
     try{
       const openSection=document.querySelector('details.admin-section-box[open]');
@@ -486,6 +495,7 @@ const globalHeaderHTML = ` <link rel="manifest" href="/manifest.json"><meta name
       sessionStorage.setItem(pageKey(),JSON.stringify({
         y:Math.max(0,window.scrollY||window.pageYOffset||0),
         sectionId,
+        panels:getPanelScroll(),
         t:Date.now()
       }));
     }catch(e){}
@@ -497,6 +507,7 @@ const globalHeaderHTML = ` <link rel="manifest" href="/manifest.json"><meta name
       const obj=JSON.parse(raw)||{};
       const y=Math.max(0,Number(obj.y)||0);
       const sectionId=String(obj.sectionId||'');
+      const panels=(obj.panels&&typeof obj.panels==='object')?obj.panels:{};
       sessionStorage.removeItem(pageKey());
       const restoreSection=()=>{
         if(sectionId && typeof window.openAdminSection==='function'){
@@ -504,13 +515,39 @@ const globalHeaderHTML = ` <link rel="manifest" href="/manifest.json"><meta name
           if(d && d.classList.contains('admin-section-box')) window.openAdminSection(sectionId);
         }
       };
-      const apply=()=>{ if(Math.abs((window.scrollY||0)-y)>2) window.scrollTo(0,y); };
+      const apply=()=>{
+        if(Math.abs((window.scrollY||0)-y)>2) window.scrollTo(0,y);
+        Object.keys(panels).forEach(id=>{
+          const box=document.getElementById(id);
+          const body=box && box.querySelector(panelSelector);
+          if(body) body.scrollTop=Math.max(0,Number(panels[id])||0);
+        });
+      };
       requestAnimationFrame(()=>requestAnimationFrame(()=>{restoreSection(); apply();}));
       setTimeout(()=>{restoreSection(); apply();},100);
       setTimeout(()=>{restoreSection(); apply();},300);
       setTimeout(apply,700);
     }catch(e){}
   }
+  document.addEventListener('scroll',function(e){
+    const target=e.target;
+    if(target && target.matches && target.matches(panelSelector)){
+      try{
+        const data={};
+        const raw=sessionStorage.getItem(pageKey());
+        if(raw){ const obj=JSON.parse(raw)||{}; Object.assign(data,obj.panels||{}); }
+        const box=target.closest('.sub-admin-box');
+        if(box && box.id){ data[box.id]=Math.max(0,target.scrollTop||0); }
+        const openSection=document.querySelector('details.admin-section-box[open]');
+        sessionStorage.setItem(pageKey(),JSON.stringify({
+          y:Math.max(0,window.scrollY||window.pageYOffset||0),
+          sectionId:openSection?String(openSection.id||''):'',
+          panels:data,
+          t:Date.now()
+        }));
+      }catch(err){}
+    }
+  },true);
   document.addEventListener('submit',function(e){saveScroll();},true);
   document.addEventListener('click',function(e){
     const el=e.target&&e.target.closest?e.target.closest('a,button,input[type="submit"]'):null;
@@ -526,9 +563,8 @@ const globalHeaderHTML = ` <link rel="manifest" href="/manifest.json"><meta name
       }
     }
   },true);
-  window.addEventListener('pageshow',restoreScroll);
-  window.addEventListener('load',restoreScroll);
-  restoreScroll();
+  window.addEventListener('beforeunload',saveScroll);
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',restoreScroll); else restoreScroll();
 })();
 </script> <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>`;
 const getNavbarHTML = (user) => ` <header> <a href="/" class="logo">🛒Online Shop</a> <form action="/search" method="GET" class="search-bar"> <input type="text" name="q" placeholder="Search in Online Shop..." required> <button type="submit">🔍</button> </form> </header> <div class="categories-nav"> <a href="/">🔥All</a> <a href="/category/Fashion">👗ফ্যাশন</a> <a href="/category/Supershop">🛒সুপার শপ</a> <a href="/category/Pharmacy">💊ফার্মেসি</a> <a href="/category/Food">🍲খাদ্যপণ্য</a> <a href="/category/Sports">⚽স্পোর্ট স</a> <a href="/category/Books">📚বই</a> <a href="/category/Stationery">✏️স্টেশনারি</a> <a href="/category/HomeDecor">🛋️হোম ডেকোর ও ফার্নিচার</a> <a href="/category/BeautyCare">💄বিউটি পার্লার কেয়ার</a> <a href="/category/Electric">⚡ইলেকট্রিক</a> </div> <div class="bottom-nav"> <a href="/"><span>🏠</span>Home</a> <a href="/wishlist"><span>❤️</span>Wishlist</a> <a href="/cart"><span>🛒</span>Cart</a> <a href="/my-orders"><span>📦</span>Orders</a> ${user ? `<a href="/notifications" style="position:relative;"><span>🔔</span>Alerts <b id="notificationBadge" style="display:none;position:absolute;top:-3px;right:8px;background:#dc3545;color:#fff;border-radius:20px;padding:1px 5px;font-size:9px;">0</b></a><a href="/request-inbox" style="position:relative;"><span>📥</span>Inbox <b id="requestInboxBadge" style="display:none;position:absolute;top:-3px;right:8px;background:#dc3545;color:#fff;border-radius:20px;padding:1px 5px;font-size:9px;">0</b></a><a href="/dashboard"><span>👤</span>Account</a>` : `<a href="/login"><span>🔑</span>Login</a>`} ${user && ((isMainAdmin(user)) || (user.role === 'subadmin' && subAdminIsActive(user))) ? `<a href="/admin-dashboard"><span>⚙️</span>${isMainAdmin(user) ? 'Admin' : 'Seller Admin'}</a>` : ''} </div> ${user ? `<script>(async()=>{try{const r=await fetch('/api/request-chat/unread-count');const d=await r.json();const b=document.getElementById('requestInboxBadge');if(b&&d.count>0){b.textContent=d.count>99?'99+':d.count;b.style.display='inline-block';};const nr=await fetch('/api/notifications/unread-count');const nd=await nr.json();const nb=document.getElementById('notificationBadge');if(nb&&nd.count>0){nb.textContent=nd.count>99?'99+':nd.count;nb.style.display='inline-block';}}catch(e){}})();</script>` : ''} ${user && user.role !== 'admin' ? `
@@ -1786,13 +1822,14 @@ ${products.map(p => `<div class="fb-product-option" data-id="${p._id}" onclick="
 </div> <hr style="margin:20px 0;"> </div></details> <details class="admin-section-box" id="settingsBox" data-section-key="settings"><summary>🛠️ Site Settings & Payment</summary><div class="admin-section-body"><h3 id="settingsSec">Site Settings & Payment Numbers</h3> <form action="/admin/update-settings" method="POST" style="background:#f9f9f9; padding:15px; border-radius:6px; margin-bottom:20px;"> <label style="font-size:13px;">bKash Number:</label><br> <input type="text" name="bkashNumber" value="${siteSetting.bkashNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br> <label style="font-size:13px;">Nagad Number:</label><br> <input type="text" name="nagadNumber" value="${siteSetting.nagadNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br> <hr style="margin:15px 0; border:0; border-top:1px solid #ddd;"> <h4 style="margin:5px 0 8px 0;">📘 Facebook API Settings</h4> <label style="font-size:13px;">Facebook Page ID:</label><br> <input type="text" name="pageId" value="${siteSetting.pageId || ''}" placeholder="Facebook Page ID" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><br> <label style="font-size:13px;">Facebook Page Access Token:</label><br> <input type="password" name="accessToken" placeholder="নতুন Page Access Token দিলে সেটি Save হবে; খালি রাখলে আগের Token থাকবে" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><small style="display:block;color:#777;margin-bottom:10px;">Token কাউকে দেবেন না। এটি শুধু server-side Facebook API call-এর জন্য ব্যবহৃত হবে।</small> <button type="submit" class="btn" style="padding:8px 16px;">Update Settings</button> </form> </div></details> ${hasSubAdminControl(req.user) ? `<details class="admin-section-box" id="subAdminBox" data-section-key="subAdmin"><summary>🛡️ Sub Admin Control Center</summary><div class="admin-section-body"><h3 id="subAdminSec">🛡️ Sub Admin Control Center</h3>
 <div class="sub-admin-control-center" style="background:linear-gradient(135deg,#fff,#f7f9fc);padding:14px;border:1px solid #e5e7eb;border-radius:14px;margin-bottom:20px;box-shadow:0 3px 12px rgba(0,0,0,.05);">
 <style>
-.sub-admin-box-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:14px}
+.sub-admin-box-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px;align-items:stretch}
+.sub-admin-box{min-width:0}
 .sub-admin-box{background:#fff;border:1px solid #dfe5ec;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.04)}
 .sub-admin-box>summary{list-style:none;cursor:pointer;padding:16px;min-height:78px;display:flex;align-items:center;gap:12px;font-weight:700}
 .sub-admin-box>summary::-webkit-details-marker{display:none}
 .sub-admin-box>summary:after{content:'＋';margin-left:auto;font-size:20px;color:#777}
 .sub-admin-box[open]>summary:after{content:'−'}
-.sub-admin-box-body{padding:0 12px 12px}
+.sub-admin-box-body{padding:0 12px 12px;max-height:calc(100vh - 250px);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-gutter:stable}
 .sub-admin-account{background:#fff;border:1px solid #e2e2e2;border-radius:10px;padding:10px;margin:8px 0}
 .sub-admin-account details>summary{cursor:pointer;font-weight:700;padding:5px 0}
 .sub-admin-account-actions{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
@@ -1804,16 +1841,29 @@ ${products.map(p => `<div class="fb-product-option" data-id="${p._id}" onclick="
 .sub-admin-search:focus{border-color:#f85606;box-shadow:0 0 0 2px rgba(248,86,6,.08)}
 .sub-admin-search-list .sub-admin-account{transition:.12s}
 .sub-admin-no-match{display:none;padding:10px;background:#f8f9fa;border-radius:8px;color:#777;font-size:13px;text-align:center}
+@media (max-width:900px){.sub-admin-box-grid{grid-template-columns:1fr}.sub-admin-box-body{max-height:55vh}}
 </style>
 <script>
 function filterSubAdminBox(inputId,listId,noMatchId){
  const input=document.getElementById(inputId), list=document.getElementById(listId), empty=document.getElementById(noMatchId);
  if(!input||!list)return;
- const q=(input.value||'').trim().toLowerCase(); let visible=0;
- list.querySelectorAll('.sub-admin-account[data-search]').forEach(card=>{
-   const ok=!q || (card.getAttribute('data-search')||'').toLowerCase().includes(q);
-   card.style.display=ok?'':'none'; if(ok)visible++;
+ const q=(input.value||'').trim().toLowerCase();
+ const cards=Array.from(list.querySelectorAll('.sub-admin-account[data-search]'));
+ const scored=[];
+ cards.forEach((card,index)=>{
+   const hay=(card.getAttribute('data-search')||'').toLowerCase().trim();
+   let score=9999;
+   if(!q) score=0;
+   else if(hay===q) score=0;
+   else if(hay.startsWith(q)) score=1;
+   else if(hay.split(/\s+/).some(part=>part.startsWith(q))) score=2;
+   else { const pos=hay.indexOf(q); if(pos>=0) score=100+pos; }
+   const ok=score<9999;
+   card.style.display=ok?'':'none';
+   scored.push({card,score,index});
  });
+ scored.sort((a,b)=>a.score-b.score || a.index-b.index).forEach(x=>list.appendChild(x.card));
+ const visible=scored.filter(x=>x.card.style.display!=='none').length;
  if(empty) empty.style.display=(q && visible===0)?'block':'none';
 }
 </script>
@@ -1844,7 +1894,7 @@ ${activeSubAdminBusiness.map(sa=>`<div class="sub-admin-account" data-search="${
 <div id="controlSubAdminList" class="sub-admin-search-list">
 ${(await User.find({role:'subadmin'}).sort({_id:-1})).map(sa=>{ const expired=!sa.unlimitedFree && sa.activationExpiresAt && new Date(sa.activationExpiresAt)<new Date(); const days=sa.unlimitedFree?'Unlimited':sa.activationExpiresAt?Math.max(0,Math.ceil((new Date(sa.activationExpiresAt)-Date.now())/86400000))+' days':'Not set'; return `<div class="sub-admin-account" data-search="${v46Esc([sa.name,sa.email,sa.subAdminShopName,sa.phone,sa.subAdminWhatsApp,sa.address,sa.subAdminStatus].filter(Boolean).join(' '))}"><details><summary>${sa.name||'No Name'} <span class="sub-admin-mini">(${sa.email}) — ${sa.subAdminStatus}</span></summary><div class="sub-admin-mini">Shop: ${sa.subAdminShopName||'N/A'} | Phone: ${sa.phone||'N/A'} | WhatsApp: ${sa.subAdminWhatsApp||'N/A'}<br>Address: ${sa.address||'N/A'}<br>Business Categories: ${(Array.isArray(sa.subAdminBusinessCategories)&&sa.subAdminBusinessCategories.length?sa.subAdminBusinessCategories.join(', '):'N/A')}<br>Plan: ${sa.activationPlan||'N/A'} | Remaining: ${days}${expired?' | ⚠️ Expired':''}</div><div class="sub-admin-account-actions">${getWhatsAppContactUrl(sa.subAdminWhatsApp)?`<a class="btn" href="${getWhatsAppContactUrl(sa.subAdminWhatsApp)}" target="_blank" rel="noopener noreferrer" style="padding:5px 8px;background:#25D366;color:#fff;text-decoration:none;">💬 WhatsApp</a>`:`<span style="padding:5px 8px;background:#eee;color:#777;border-radius:4px;font-size:12px;">WhatsApp যাচাই প্রয়োজন</span>`}<form action="/admin/subadmin/action/${sa._id}" method="POST" style="display:flex;gap:4px;"><input type="number" name="days" value="30" min="1" style="width:60px;padding:5px"><input type="hidden" name="action" value="approve"><button class="btn" style="padding:5px 8px;background:#28a745">Approve/Extend</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST"><input type="hidden" name="action" value="free-unlimited"><button class="btn" style="padding:5px 8px;background:#6f42c1">Free Unlimited</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST" style="display:flex;gap:4px"><input type="number" name="days" value="30" min="1" style="width:60px;padding:5px"><input type="hidden" name="action" value="free-days"><button class="btn" style="padding:5px 8px;background:#20c997">Free Days</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST"><input type="hidden" name="action" value="reject"><button class="btn" style="padding:5px 8px;background:#343a40">Reject</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST"><input type="hidden" name="action" value="suspend"><button class="btn" style="padding:5px 8px;background:#dc3545">Suspend</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST"><input type="hidden" name="action" value="expire"><button class="btn" style="padding:5px 8px;background:#6c757d">Expire</button></form><form action="/admin/subadmin/action/${sa._id}" method="POST" style="display:flex;gap:4px;flex:1;min-width:220px;"><input type="hidden" name="action" value="warn"><input type="text" name="message" placeholder="Warning / Notice message" style="flex:1;padding:5px" required><button class="btn" style="padding:5px 8px;background:#f0ad4e">Send Warning</button></form><form action="/admin/subadmin/message/${sa._id}" method="POST" style="display:flex;gap:4px;flex:1;min-width:220px;"><input type="text" name="message" placeholder="Message to Sub Admin" required style="flex:1;padding:5px"><button class="btn" style="padding:5px 8px;background:#007bff;color:#fff">📨 Send Message</button></form><form action="/admin/subadmin/permissions/${sa._id}" method="POST" style="margin-top:8px;flex-basis:100%;background:#f8fafc;border:1px solid #e6e9ed;border-radius:8px;padding:8px;"><b style="font-size:12px;display:block;">Assigned Sections (Sub Admin-এর নিজের access)</b><div class="admin-permission-list">${ADMIN_SECTION_KEYS.map(k=>`<label><input type="checkbox" name="sections" value="${k}" ${(Array.isArray(sa.adminSections)&&sa.adminSections.includes(k))?'checked':''}> ${k}</label>`).join('')}</div><button class="btn" style="margin-top:7px;padding:5px 9px;background:#6c757d;">💾 Save Section Access</button></form></div></details></div>`;}).join('')||'<div class="sub-admin-empty">কোনো Sub Admin account নেই।</div>'}
 </div><div id="controlSubAdminNoMatch" class="sub-admin-no-match">কোনো matching Admin পাওয়া যায়নি।</div>
-<div style="margin-top:12px;padding:10px;background:#fff;border:1px solid #ddd;border-radius:8px;"><b>🆘 Sub Admin Help Requests</b>${(await SubAdminSupport.find().sort({_id:-1}).limit(50)).map(sm=>`<div style="margin-top:8px;padding:8px;background:#f9f9f9;border-radius:5px;"><b>${sm.subAdminEmail}</b><br><span style="font-size:12px;">${sm.message}</span>${sm.requestedWhatsApp?`<div style="margin-top:5px;color:#0b63ce;"><b>Requested New WhatsApp:</b> ${sm.requestedWhatsApp}</div>`:''}${sm.reply?`<div style="margin-top:5px;color:#087f23;"><b>Your Reply:</b> ${sm.reply}</div>`:''}<form action="/admin/subadmin/support/${sm._id}" method="POST" style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;"><input type="text" name="reply" value="${sm.reply||''}" placeholder="Reply to Sub Admin" style="flex:1;padding:6px;min-width:180px;"><button class="btn" style="padding:5px 9px;">Reply</button></form>${sm.requestedWhatsApp?`<form action="/admin/subadmin/update-whatsapp/${sm.subAdminId}" method="POST" style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;"><input type="text" name="whatsapp" value="${sm.requestedWhatsApp||''}" required style="flex:1;padding:6px;min-width:180px;"><button class="btn" style="padding:5px 9px;background:#25D366;color:#fff;">✅ Verify & Update WhatsApp</button></form>`:''}</div>`).join('')||'<p style="color:#777">No help requests.</p>'}</div>
+<div style="margin-top:12px;padding:10px;background:#fff;border:1px solid #ddd;border-radius:8px;"><b>🆘 Sub Admin Help Requests</b>${(await SubAdminSupport.find().sort({_id:-1}).limit(50)).map(sm=>`<div style="margin-top:8px;padding:8px;background:#f9f9f9;border-radius:5px;"><b>${sm.subAdminEmail}</b><br><span style="font-size:12px;">${sm.message}</span>${sm.requestedWhatsApp?`<div style="margin-top:5px;color:#0b63ce;"><b>Requested New WhatsApp:</b> ${sm.requestedWhatsApp}</div>`:''}${sm.reply?`<div style="margin-top:5px;color:#087f23;"><b>Your Reply:</b> ${sm.reply}</div>`:''}<form action="/admin/subadmin/support/${sm._id}" method="POST" style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;"><input type="text" name="reply" value="" placeholder="Reply to Sub Admin" style="flex:1;padding:6px;min-width:180px;"><button class="btn" style="padding:5px 9px;">Reply</button></form>${sm.requestedWhatsApp?`<form action="/admin/subadmin/update-whatsapp/${sm.subAdminId}" method="POST" style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;"><input type="text" name="whatsapp" value="${sm.requestedWhatsApp||''}" required style="flex:1;padding:6px;min-width:180px;"><button class="btn" style="padding:5px 9px;background:#25D366;color:#fff;">✅ Verify & Update WhatsApp</button></form>`:''}</div>`).join('')||'<p style="color:#777">No help requests.</p>'}</div>
 <div style="margin-top:12px;padding:10px;background:#fff5f5;border:1px solid #ffd1d1;border-radius:8px;"><b>🔑 Password Reset Requests</b>${(await SubAdminSupport.find({requestType:'login_password_reset'}).sort({_id:-1}).limit(50)).map(sm=>`<div style="margin-top:8px;padding:8px;background:#fff;border-radius:5px;border:1px solid #eee;"><b>${sm.subAdminEmail}</b><br><span style="font-size:12px;white-space:pre-wrap;">${sm.message}</span><br><span style="font-size:12px;color:#666;">Status: ${sm.resetStatus}</span>${sm.resetStatus!=='completed'?`<form action="/admin/login-help/reset/${sm._id}" method="POST" style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;"><input type="password" name="newPassword" minlength="6" required placeholder="নতুন Password সেট করুন" style="flex:1;padding:6px;min-width:180px;"><button class="btn" style="padding:5px 9px;background:#28a745;">✅ Reset Password</button></form>`:''}</div>`).join('')||'<p style="color:#777">No password reset requests.</p>'}</div>
 </div></details>
 </div></div></details>` : ''} 
