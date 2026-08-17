@@ -711,7 +711,7 @@ let chatsHTML = chats.map(c => {
 }).join('');
 let reviewsHTML = reviews.map(r => ` <div style="border-bottom:1px solid #eee; padding:8px 0; font-size:13px;"> <p style="margin:0 0 2px 0;"><b>${r.userEmail}</b> - <span style="color:#ff9800; font-weight:bold;">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span></p> <p style="margin:0; color:#444;">${r.comment}</p> </div> `).join('');
 let relatedHTML = relatedProducts.map(p => ` <div class="product-card" onclick="window.location.href='/product/${p._id}'"> <img src="${mediaUrl(p.mainImage)}" alt="${p.name}" onclick="event.stopPropagation(); openImageModal('${mediaUrl(p.mainImage)}');"> <h4 style="font-size:13px; height:32px;">${p.name}</h4> <div class="price" style="font-size:15px;">৳${p.price}</div> </div> `).join(''); 
-res.send(` <!DOCTYPE html> <html> <head><title>${product.name}</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="background:white; padding:15px; border-radius:6px;"> <div style="display:flex; gap:20px; flex-wrap:wrap;"> <div style="width:100%; max-width:320px; margin:0 auto;"> <img id="mainProductImg" src="${mediaUrl(requestedPreviewImage)}" style="width:100%; height:300px; object-fit:cover; border-radius:6px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(this.src)"><br> <div id="productGallery" style="display:flex; gap:8px; margin-top:10px; overflow-x:auto; padding:2px;">${galleryHTML}</div> </div> <div style="flex:1; min-width: 260px;"> <h2 style="font-size:18px; margin-top:0;">${product.name}</h2> <p style="font-size:13px; color:#666;"><b>Category:</b> ${product.category}</p> <div class="price">৳${product.price}</div> ${isCustomerLike(req.user) ? `<form action="/wishlist/toggle/${product._id}" method="POST" style="margin:8px 0;"><button type="submit" class="btn" style="background:#e91e63;color:#fff;padding:7px 12px;">❤️ ${Array.isArray(req.user.wishlist) && req.user.wishlist.map(String).includes(String(product._id)) ? 'Remove from Wishlist' : 'Add to Wishlist'}</button></form>` : ''} <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock}</p> <p style="font-size:13px; color:#d9534f;"><b>Maximum Order Limit:</b> ${product.maxOrderLimit || 5}</p> <p style="font-size:13px; color:#007bff;"><b>Delivery Charge:</b> ৳${product.deliveryCharge || 150}</p> <p style="font-size:14px; color:#440;">${product.description}</p> <br> <div id="productQuantityControl" style="display:flex; align-items:center; gap:10px; margin-bottom:15px;"> <span style="font-weight:600; font-size:13px;">Quantity:</span> <form action="/product/${product._id}" method="GET" style="display:inline;margin:0;padding:0;"> <input type="hidden" name="qty" value="${Math.max(1,currentQty-1)}"> <input type="hidden" name="selectedImage" value="${String(requestedPreviewImage || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"> <button type="submit" id="qtyMinusBtn" aria-label="Decrease quantity" ${currentQty <= 1 ? 'disabled' : ''} style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:${currentQty <= 1 ? 'not-allowed' : 'pointer'}; position:relative; z-index:100; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none; opacity:${currentQty <= 1 ? '0.5' : '1'};">−</button> </form> <span id="qtyDisplay" style="font-size:16px; font-weight:bold; min-width:25px; text-align:center;">${currentQty}</span> <form action="/product/${product._id}" method="GET" style="display:inline;margin:0;padding:0;"> <input type="hidden" name="qty" value="${Math.min(allowedMax,currentQty+1)}"> <input type="hidden" name="selectedImage" value="${String(requestedPreviewImage || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"> <button type="submit" id="qtyPlusBtn" aria-label="Increase quantity" ${currentQty >= allowedMax ? 'disabled' : ''} style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:${currentQty >= allowedMax ? 'not-allowed' : 'pointer'}; position:relative; z-index:100; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none; opacity:${currentQty >= allowedMax ? '0.5' : '1'};">+</button> </form> </div> <div style="display: flex; gap: 10px; flex-wrap:wrap;"> <a id="buyNowBtn" href="/buy-now/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn btn-buy" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center;">Buy Now</a> <a id="addToCartBtn" href="/api/add-to-cart/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#28a745;">🛒Add to Cart</a> ${getProductWhatsAppUrl(product) ? `<a href="${getProductWhatsAppUrl(product)}" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#25D366; color:#fff; text-decoration:none;">💬 WhatsApp-এ কথা বলুন</a>` : ''} </div> </div> </div> <script>
+res.send(` <!DOCTYPE html> <html> <head><title>${product.name}</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="background:white; padding:15px; border-radius:6px;"> <div style="display:flex; gap:20px; flex-wrap:wrap;"> <div style="width:100%; max-width:320px; margin:0 auto;"> <img id="mainProductImg" src="${mediaUrl(requestedPreviewImage)}" style="width:100%; height:300px; object-fit:cover; border-radius:6px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(this.src)"><br> <div id="productGallery" style="display:flex; gap:8px; margin-top:10px; overflow-x:auto; padding:2px;">${galleryHTML}</div> </div> <div style="flex:1; min-width: 260px;"> <h2 style="font-size:18px; margin-top:0;">${product.name}</h2> <p style="font-size:13px; color:#666;"><b>Category:</b> ${product.category}</p> <div class="price">৳${product.price}</div> ${isCustomerLike(req.user) ? `<form action="/wishlist/toggle/${product._id}" method="POST" style="margin:8px 0;"><button type="submit" class="btn" style="background:#e91e63;color:#fff;padding:7px 12px;">❤️ ${Array.isArray(req.user.wishlist) && req.user.wishlist.map(String).includes(String(product._id)) ? 'Remove from Wishlist' : 'Add to Wishlist'}</button></form>` : ''} <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock}</p> <p style="font-size:13px; color:#d9534f;"><b>Maximum Order Limit:</b> ${product.maxOrderLimit || 5}</p> <p style="font-size:13px; color:#007bff;"><b>Delivery Charge:</b> ৳${product.deliveryCharge || 150}</p> <p style="font-size:14px; color:#440;">${product.description}</p> <br> <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;"> <span style="font-weight:600; font-size:13px;">Quantity:</span> <button type="button" id="qtyMinusBtn" aria-label="Decrease quantity" onclick="return decrementQty();" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:pointer; position:relative; z-index:50; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none;">−</button> <span id="qtyDisplay" style="font-size:16px; font-weight:bold; min-width:25px; text-align:center;">${currentQty}</span> <button type="button" id="qtyPlusBtn" aria-label="Increase quantity" onclick="return incrementQty();" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:pointer; position:relative; z-index:50; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none;">+</button> </div> <div style="display: flex; gap: 10px; flex-wrap:wrap;"> <a id="buyNowBtn" href="/buy-now/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn btn-buy" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center;">Buy Now</a> <a id="addToCartBtn" href="/api/add-to-cart/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#28a745;">🛒Add to Cart</a> ${getProductWhatsAppUrl(product) ? `<a href="${getProductWhatsAppUrl(product)}" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#25D366; color:#fff; text-decoration:none;">💬 WhatsApp-এ কথা বলুন</a>` : ''} </div> </div> </div> <script>
 const galleryImages = ${JSON.stringify(galleryData)};
 let currentQty = ${currentQty};
 const productMaxLimit = Math.max(0, Number(${Number(product.maxOrderLimit || 5)}) || 5);
@@ -729,27 +729,18 @@ function updateOrderLinks() {
   const cartBtn = document.getElementById('addToCartBtn');
   const productId = ${JSON.stringify(String(product._id))};
   const encodedImage = encodeURIComponent(selectedImage || '');
-  const safeQty = Math.max(1, Number(currentQty) || 1);
-  if (buyBtn) buyBtn.href = '/buy-now/' + productId + '?qty=' + safeQty + '&selectedImage=' + encodedImage;
-  if (cartBtn) cartBtn.href = '/api/add-to-cart/' + productId + '?qty=' + safeQty + '&selectedImage=' + encodedImage;
+  if (buyBtn) buyBtn.href = '/buy-now/' + productId + '?qty=' + Math.max(1,currentQty) + '&selectedImage=' + encodedImage;
+  if (cartBtn) cartBtn.href = '/api/add-to-cart/' + productId + '?qty=' + Math.max(1,currentQty) + '&selectedImage=' + encodedImage;
 }
 function refreshQtyUI() {
-  const max = allowedMax > 0 ? allowedMax : 1;
-  currentQty = Math.max(1, Math.min(max, Math.floor(Number(currentQty) || 1)));
+  if (currentQty < 1) currentQty = 1;
+  if (allowedMax > 0 && currentQty > allowedMax) currentQty = allowedMax;
   const display = document.getElementById('qtyDisplay');
   const minus = document.getElementById('qtyMinusBtn');
   const plus = document.getElementById('qtyPlusBtn');
   if (display) display.textContent = String(currentQty);
-  if (minus) {
-    minus.disabled = currentQty <= 1;
-    minus.style.opacity = minus.disabled ? '0.5' : '1';
-    minus.style.cursor = minus.disabled ? 'not-allowed' : 'pointer';
-  }
-  if (plus) {
-    plus.disabled = allowedMax <= 1 || currentQty >= max;
-    plus.style.opacity = plus.disabled ? '0.5' : '1';
-    plus.style.cursor = plus.disabled ? 'not-allowed' : 'pointer';
-  }
+  if (minus) { minus.disabled = currentQty <= 1; minus.style.opacity = currentQty <= 1 ? '0.5' : '1'; minus.style.cursor = currentQty <= 1 ? 'not-allowed' : 'pointer'; }
+  if (plus) { plus.disabled = allowedMax <= 1 || currentQty >= allowedMax; plus.style.opacity = plus.disabled ? '0.5' : '1'; plus.style.cursor = plus.disabled ? 'not-allowed' : 'pointer'; }
   updateOrderLinks();
 }
 function incrementQty() {
@@ -764,7 +755,8 @@ function decrementQty() {
   return false;
 }
 function adjustProductQty(delta) {
-  return Number(delta) > 0 ? incrementQty() : decrementQty();
+  if (Number(delta) > 0) return incrementQty();
+  return decrementQty();
 }
 function setMainProductImage(index, element) {
   const item = galleryImages[Number(index)];
@@ -795,36 +787,22 @@ function bindProductControlEvents() {
   const plus = document.getElementById('qtyPlusBtn');
   const minus = document.getElementById('qtyMinusBtn');
   const gallery = document.getElementById('productGallery');
-
-  // Quantity buttons intentionally use normal GET forms.
-  // This makes + / − work even when JavaScript click handlers are blocked;
-  // each click reloads /product/:id with the new qty in the URL.
-
-  if (gallery && !gallery.dataset.galleryBound) {
-    gallery.dataset.galleryBound = '1';
-    gallery.addEventListener('click', function(ev){
-      const thumb = ev.target.closest('.thumb-link');
-      if (!thumb || !gallery.contains(thumb)) return;
-      ev.preventDefault();
-      ev.stopPropagation();
-      setMainProductImage(Number(thumb.dataset.galleryIndex), thumb);
-    }, {passive:false});
-  }
+  if (plus) plus.addEventListener('click', function(ev){ ev.preventDefault(); ev.stopPropagation(); incrementQty(); }, {passive:false});
+  if (minus) minus.addEventListener('click', function(ev){ ev.preventDefault(); ev.stopPropagation(); decrementQty(); }, {passive:false});
+  if (gallery) gallery.addEventListener('click', function(ev){
+    const thumb = ev.target.closest('.thumb-link');
+    if (!thumb || !gallery.contains(thumb)) return;
+    ev.preventDefault(); ev.stopPropagation();
+    setMainProductImage(Number(thumb.dataset.galleryIndex), thumb);
+  }, {passive:false});
 }
 function initProductControls() {
-  const control = document.getElementById('productQuantityControl');
-  if (!control) return;
   bindProductControlEvents();
   refreshQtyUI();
-  if (galleryImages.length) {
-    setMainProductImage(${selectedGalleryIndex}, document.querySelector('.thumb-link[data-gallery-index="${selectedGalleryIndex}"]'));
-  }
+  if (galleryImages.length) setMainProductImage(${selectedGalleryIndex}, document.querySelector('.thumb-link[data-gallery-index="${selectedGalleryIndex}"]'));
 }
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initProductControls, {once:true});
-} else {
-  initProductControls();
-}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initProductControls);
+else initProductControls();
 </script> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ratings & Reviews</h3> <form action="/api/add-review" method="POST" style="background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:15px;"> <input type="hidden" name="productId" value="${product._id}"> <label style="font-size:13px; font-weight:600;">Rate this product:</label> <select name="rating" style="padding:5px; margin-bottom:8px; border-radius:4px; border:1px solid #ccc;" required> <option value="5">★★★★★ (5 Stars)</option> <option value="4">★★★★☆ (4 Stars)</option> <option value="3">★★★☆☆ (3 Stars)</option> <option value="2">★★☆☆☆ (2 Stars)</option> <option value="1">★☆☆☆☆ (1 Star)</option> </select><br> <textarea name="comment" placeholder="Write your review here..." style="width:100%; height:50px; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required></textarea> <button type="submit" class="btn" style="padding:6px 12px; font-size:12px; margin-top:5px;">Submit Review</button> </form> <div>${reviewsHTML.length ? reviewsHTML : '<p style="color:#777; font-size:13px;">No reviews yet.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>You May Also Like</h3> <div class="product-grid" style="margin-top:10px;">${relatedHTML.length ? relatedHTML : '<p>No related products.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ask Question About This Product</h3> <form action="/api/chat" method="POST"> <input type="hidden" name="productId" value="${product._id}"> <input type="hidden" name="productName" value="${product.name}"> <input type="hidden" name="productImage" value="${product.mainImage}"> <textarea name="message" placeholder="Ask your question here..." style="width:100%; height:70px; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea><br> <button type="submit" class="btn" style="margin-top:6px; padding:8px 14px;">Send Question</button> </form> <div style="margin-top:20px;"> <h4 style="margin-bottom:10px;">Customer Q&A (পণ্যের বিষয়ে আপনার ও এডমিনের কথোপকথন):</h4> ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions yet.</p>'} </div> </div> </body> </html> `);
 } catch (err) {
 next(err);
@@ -1564,7 +1542,7 @@ try {
 } catch(e){ next(e); }
 });
 // ================= Seller Product Catalog / Send Product =================
-app.get('/admin/sell-products', async (req,res,next)=>{
+app.get('/admin/sell-products', requireAdminSection('sellProducts'), async (req,res,next)=>{
   try {
     if(!req.user || !isStaff(req.user) || !subAdminIsActive(req.user)) return res.redirect('/login');
     const filter=isMainAdmin(req.user)?{}:{ownerId:String(req.user._id)};
@@ -2061,6 +2039,31 @@ app.post('/subadmin/product-request/accept/:id', async (req,res,next)=>{
   } catch(e){next(e);}
 });
 
+// ===== V58 EMPLOYEE ADMIN NAVIGATION FIX =====
+// Some older/stale employee dashboard/PWA links can still point directly to
+// /admin/<section>. Those URLs must resolve to the dashboard section instead
+// of falling through to a missing GET route. Keep POST action routes unchanged.
+const V58_EMPLOYEE_SECTION_ROUTES = {
+  'add-product': 'addProduct',
+  'sell-products': 'sellProducts',
+  'orders': 'orders',
+  'users': 'users',
+  'qa': 'qa',
+  'coupons': 'coupons',
+  'facebook': 'facebook',
+  'settings': 'settings',
+  'product-requests': 'productRequests',
+  'products': 'products',
+  'help': 'help'
+};
+for (const [routeName, sectionKey] of Object.entries(V58_EMPLOYEE_SECTION_ROUTES)) {
+  app.get('/admin/' + routeName, requireAdminSection(sectionKey), (req, res) => {
+    if (!req.user || !isStaff(req.user) || !subAdminIsActive(req.user)) return res.redirect('/login');
+    const target = '/admin-dashboard?staff=1&section=' + encodeURIComponent(sectionKey) + '#' + encodeURIComponent(sectionKey + 'Sec');
+    return res.redirect(target);
+  });
+}
+
 // Admin Actions Backend Routes
 app.post('/admin/subadmin/permissions/:id', async (req,res,next)=>{ try { if(!isMainAdmin(req.user)) return res.status(403).send('Unauthorized: Main Admin access required'); const sa=await User.findOne({_id:req.params.id,role:'subadmin'}); if(!sa) return res.status(404).send('Sub Admin not found'); const raw=req.body.sections; const sections=Array.isArray(raw)?raw:(raw?[raw]:[]); sa.adminSections=sections.filter(x=>ADMIN_SECTION_KEYS.includes(String(x))); await sa.save(); res.redirect('/admin-dashboard#subAdminSec'); } catch(e){next(e);} });
 
@@ -2372,7 +2375,7 @@ app.get('/manifest.json', (req, res) => {
 });
 
 app.get('/sw.js', (req, res) => {
-  res.type('application/javascript').send(`const CACHE_NAME='online-shop-v34-static-v1';
+  res.type('application/javascript').send(`const CACHE_NAME='online-shop-v35-employee-fix-v1';
 self.addEventListener('install',event=>{self.skipWaiting();});
 self.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});
 self.addEventListener('fetch',event=>{
