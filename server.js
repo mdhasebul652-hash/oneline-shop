@@ -14,8 +14,9 @@ api_secret: process.env.CLOUDINARY_API_SECRET
 });
 const bcrypt = require('bcryptjs');
 const path = require('path');
-const TIKTOK_CLIENT_KEY = process.env.aw24p840xwrdlys;
-const TIKTOK_SECRET = process.env.XZPkFIFikPu04DZIu5x3Q4MYRbLZy4D;
+const TIKTOK_CLIENT_KEY = 'aw24p840xwrdlys';
+const TIKTOK_SECRET = 'XZPkFIFikPu04DZIu5x3Q4MYRbLZy4D';
+
 const fs = require('fs');
 const crypto = require('crypto');
 const app = express();
