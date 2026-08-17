@@ -398,9 +398,13 @@ function subAdminHasSection(user, section) {
     return allowed.includes(section);
   }
   if (!isSubAdmin(user) || !subAdminIsActive(user)) return false;
-  const allowed = Array.isArray(user.adminSections) ? user.adminSections : [];
-  // Empty permission means no assigned section, never full access.
-  return allowed.includes(section);
+  // Active Seller Admin gets the same operational control-panel sections as Main Admin,
+  // except the protected Sub Admin Control Center. Employee Management remains available
+  // so the Seller Admin can create/manage employees and assign them only these operational sections.
+  // The Sub Admin's own account cannot create/manage another Sub Admin.
+  const sellerOperationalSections = ADMIN_SECTION_KEYS.filter(k => k !== 'subAdmin');
+  if (section === 'employeeManagement') return true;
+  return sellerOperationalSections.includes(section);
 }
 function requireAdminSection(section) {
   return (req,res,next) => { if (!req.user || !subAdminHasSection(req.user, section)) return res.status(403).send('This Admin section is not assigned to your account.'); next(); };
@@ -1699,7 +1703,7 @@ function openAdminSection(id){
  document.querySelector('.admin-section-launcher')?.classList.add('admin-launcher-hidden');
  setTimeout(()=>d.scrollIntoView({behavior:'smooth',block:'start'}),20);
 }
-const ADMIN_ALLOWED_SECTIONS = ${JSON.stringify(isMainAdmin(req.user)?[...ADMIN_SECTION_KEYS,'employeeManagement']:(isEmployee(req.user)?(Array.isArray(req.user.staffAssignedSections)?req.user.staffAssignedSections:[]):[...(Array.isArray(req.user.adminSections)?req.user.adminSections:[]),'employeeManagement']))};
+const ADMIN_ALLOWED_SECTIONS = ${JSON.stringify(isMainAdmin(req.user)?[...ADMIN_SECTION_KEYS,'employeeManagement']:(isEmployee(req.user)?(Array.isArray(req.user.staffAssignedSections)?req.user.staffAssignedSections:[]):[...ADMIN_SECTION_KEYS.filter(k=>k!=='subAdmin'),'employeeManagement']))};
 const IS_MAIN_ADMIN = ${isMainAdmin(req.user)?'true':'false'};
 function applySectionPermissions(){ if(IS_MAIN_ADMIN)return; document.querySelectorAll('[data-section-key]').forEach(x=>{if(!ADMIN_ALLOWED_SECTIONS.includes(x.dataset.sectionKey)){x.style.display='none';x.classList.add('staff-hidden');}}); const map={productRequestsBox:'productRequests',productsBox:'products',subAdminBox:'subAdmin'}; Object.entries(map).forEach(([id,key])=>{const el=document.getElementById(id);if(el&&!ADMIN_ALLOWED_SECTIONS.includes(key)){el.style.display='none';el.classList.add('staff-hidden');}}); if(document.body.classList.contains('staff-restricted-dashboard')){ document.querySelectorAll('.admin-launch-box[data-section-key]').forEach(x=>{if(!ADMIN_ALLOWED_SECTIONS.includes(x.dataset.sectionKey)){x.style.display='none';}}); const first=ADMIN_ALLOWED_SECTIONS.find(k=>k!=='employeeManagement')||ADMIN_ALLOWED_SECTIONS[0]; const idMap={addProduct:'addProductBox',sellProducts:'sellProductsBox',orders:'ordersBox',users:'usersBox',qa:'qaBox',coupons:'couponsBox',facebook:'facebookBox',settings:'settingsBox',productRequests:'productRequestsBox',products:'productsBox',help:'mainAdminHelpBox'}; const firstId=idMap[first]; if(firstId){openAdminSection(firstId);} }}
 if(document.readyState === 'loading'){document.addEventListener('DOMContentLoaded',applySectionPermissions,{once:true});}else{applySectionPermissions();}
@@ -1854,7 +1858,7 @@ app.post('/admin/staff/create', async(req,res,next)=>{ try {
   if(!email||!name||password.length<6) return res.status(400).send('Name, valid email and password (6+ chars) are required.');
   if(await User.findOne({email})) return res.status(400).send('এই Email দিয়ে account আগে থেকেই আছে।');
   const raw=req.body.sections; const requested=Array.isArray(raw)?raw:(raw?[raw]:[]);
-  const parentAllowed=isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[]);
+  const parentAllowed=isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(isSubAdmin(req.user)?ADMIN_SECTION_KEYS.filter(k=>k!=='subAdmin'):(Array.isArray(req.user.adminSections)?req.user.adminSections:[]));
   const sections=requested.map(String).filter(x=>parentAllowed.includes(x));
   if(!sections.length) return res.status(400).send('কমপক্ষে একটি assigned section নির্বাচন করুন।');
   const hash=await bcrypt.hash(password,10);
@@ -1875,7 +1879,7 @@ app.post('/admin/staff/permissions/:id', async(req,res,next)=>{ try {
   if(!isMainAdmin(req.user) && !(isSubAdmin(req.user)&&subAdminIsActive(req.user))) return res.status(403).send('Unauthorized');
   const st=await User.findOne({_id:req.params.id,role:'staff',staffParentAdminId:String(req.user._id)}); if(!st) return res.status(404).send('Employee not found');
   const raw=req.body.sections; const requested=Array.isArray(raw)?raw:(raw?[raw]:[]);
-  const parentAllowed=isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[]);
+  const parentAllowed=isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(isSubAdmin(req.user)?ADMIN_SECTION_KEYS.filter(k=>k!=='subAdmin'):(Array.isArray(req.user.adminSections)?req.user.adminSections:[]));
   const sections=requested.map(String).filter(x=>parentAllowed.includes(x));
   if(!sections.length) return res.status(400).send('কমপক্ষে একটি assigned section রাখুন।');
   st.staffAssignedSections=sections; st.staffPwaSection=sections[0]; await st.save(); res.redirect('/admin-dashboard#staffBox');
@@ -1974,13 +1978,15 @@ app.get('/request-inbox', async (req,res,next)=>{
     const email=normalizeEmail(req.user.email);
     let requests=[];
     if(isMainAdmin(req.user)) requests=await ProductRequest.find({status:{$in:['accepted','closed']}}).sort({_id:-1}).limit(100).lean();
-    else if(isSubAdmin(req.user) || isEmployee(req.user)) requests=await ProductRequest.find({acceptedByEmail:email,status:{$in:['accepted','closed']}}).sort({_id:-1}).limit(100).lean();
+    else if(isSubAdmin(req.user) && subAdminIsActive(req.user)) requests=await ProductRequest.find({$or:[{acceptedByEmail:email,status:{$in:['accepted','closed']}},{status:'broadcasted',targetSubAdminIds:String(req.user._id)}]}).sort({_id:-1}).limit(100).lean();
+    else if(isEmployee(req.user)) requests=await ProductRequest.find({acceptedByEmail:email,status:{$in:['accepted','closed']}}).sort({_id:-1}).limit(100).lean();
     else requests=await ProductRequest.find({userEmail:email,status:{$in:['accepted','closed']}}).sort({_id:-1}).limit(100).lean();
     let html='';
     for(const r of requests){
       const msgs=await ProductRequestChat.find({requestId:String(r._id)}).sort({_id:1}).limit(200).lean();
       const unread=await ProductRequestChat.countDocuments({requestId:String(r._id),recipientEmail:email,isRead:false});
       const isAcceptedSeller = (isSubAdmin(req.user) || isEmployee(req.user)) && normalizeEmail(r.acceptedByEmail)===email;
+      const isTargetedSubAdmin = isSubAdmin(req.user) && subAdminIsActive(req.user) && r.status==='broadcasted' && Array.isArray(r.targetSubAdminIds) && r.targetSubAdminIds.map(String).includes(String(req.user._id));
       const currentUserId = String(req.user._id || '');
       const currentPhone = String(req.user.phone || '').replace(/\D/g,'');
       const requestPhone = String(r.userPhone || '').replace(/\D/g,'');
@@ -1993,7 +1999,8 @@ app.get('/request-inbox', async (req,res,next)=>{
       const sameEmail = !!email && !!normalizeEmail(r.userEmail) && normalizeEmail(r.userEmail) === email;
       const isRequestCustomer = !isPrivilegedStaff && (sameUserId || sameEmail || samePhoneAndName);
       const canChat = (r.status==='accepted' || r.status==='closed') && (isAcceptedSeller || isRequestCustomer);
-      html+=`<div style="background:#fff;border:1px solid #e5e5e5;border-radius:14px;padding:14px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.05)"><div style="display:flex;gap:12px;align-items:flex-start">${r.requestImage?`<img src="${mediaUrl(r.requestImage)}" width="72" height="72" style="object-fit:cover;border-radius:9px;cursor:pointer" onclick="openImageModal(this.src)">`:''}<div style="flex:1"><b style="color:#f85606">${r.productName}</b><div style="font-size:12px;color:#666;margin-top:3px">Customer: ${r.userName||''} | ${r.userPhone||''}</div><div style="font-size:12px;color:#666">Address: ${r.userAddress||''}</div><div style="font-size:12px;color:#555;margin-top:3px">${r.details||''}</div><div style="font-size:12px;color:#087f23;margin-top:4px"><b>Accepted by:</b> ${r.acceptedByEmail||''} ${unread?`<span style="background:#dc3545;color:#fff;border-radius:10px;padding:2px 6px;margin-left:5px">${unread} নতুন</span>`:''}</div></div></div><div style="margin-top:12px;background:#fafafa;border:1px solid #eee;border-radius:10px;padding:10px;max-height:260px;overflow:auto">${msgs.length?msgs.map(m=>`<div style="padding:7px 9px;margin:5px 0;border-radius:9px;background:${m.senderEmail===email?'#fff1e8':'#eef7ff'}"><div style="font-size:11px;color:#777">${m.senderEmail===email?'আপনি':m.senderRole==='subadmin'?'Shop Admin':m.senderRole==='staff'?'Employee':'Customer'} • ${new Date(m.createdAt).toLocaleString()}</div><div style="font-size:14px;margin-top:2px">${m.message}</div></div>`).join(''):'<div style="color:#777;text-align:center;padding:15px">এখনও কোনো মেসেজ নেই।</div>'}</div>${canChat?`<form action="/request-inbox/send" method="POST" style="display:flex;gap:6px;margin-top:9px;align-items:center;flex-wrap:wrap"><input type="hidden" name="requestId" value="${r._id}"><input type="text" name="message" required maxlength="3000" placeholder="${isRequestCustomer?'Shop Admin-কে reply লিখুন...':'Customer-কে reply লিখুন...'}" style="flex:1;min-width:220px;padding:9px;border:1px solid #ccc;border-radius:8px"><button class="btn" type="submit" style="padding:8px 12px">📨 ${isRequestCustomer?'Reply':'Send'}</button></form>`:''}</div>`;
+      const acceptBox = isTargetedSubAdmin ? `<form action="/subadmin/product-request/accept/${r._id}" method="POST" style="margin-top:10px;padding:10px;background:#fff8e8;border:1px solid #f0d58a;border-radius:9px"><div style="font-size:12px;color:#7a5b00;margin-bottom:7px"><b>এই Product Request আপনার কাছে পাঠানো হয়েছে।</b><br>Accept করলে request আপনার Admin account-এর নামে lock হবে এবং Customer-এর সাথে সরাসরি chat চালু হবে।</div><button class="btn" type="submit" style="padding:8px 12px;background:#28a745;color:#fff" onclick="return confirm('এই Product Request আপনি গ্রহণ করে Customer-এর সাথে chat শুরু করবেন?')">✅ Accept & Start Customer Chat</button></form>` : '';
+      html+=`<div style="background:#fff;border:1px solid #e5e5e5;border-radius:14px;padding:14px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.05)"><div style="display:flex;gap:12px;align-items:flex-start">${r.requestImage?`<img src="${mediaUrl(r.requestImage)}" width="72" height="72" style="object-fit:cover;border-radius:9px;cursor:pointer" onclick="openImageModal(this.src)">`:''}<div style="flex:1"><b style="color:#f85606">${r.productName}</b><div style="font-size:12px;color:#666;margin-top:3px">Customer: ${r.userName||''} | ${r.userPhone||''}</div><div style="font-size:12px;color:#666">Address: ${r.userAddress||''}</div><div style="font-size:12px;color:#555;margin-top:3px">${r.details||''}</div><div style="font-size:12px;color:#087f23;margin-top:4px"><b>Status:</b> ${r.status}${r.acceptedByEmail?` — Accepted by ${r.acceptedByEmail}`:''} ${unread?`<span style="background:#dc3545;color:#fff;border-radius:10px;padding:2px 6px;margin-left:5px">${unread} নতুন</span>`:''}</div>${acceptBox}</div></div><div style="margin-top:12px;background:#fafafa;border:1px solid #eee;border-radius:10px;padding:10px;max-height:260px;overflow:auto">${msgs.length?msgs.map(m=>`<div style="padding:7px 9px;margin:5px 0;border-radius:9px;background:${m.senderEmail===email?'#fff1e8':'#eef7ff'}"><div style="font-size:11px;color:#777">${m.senderEmail===email?'আপনি':m.senderRole==='subadmin'?'Shop Admin':m.senderRole==='staff'?'Employee':'Customer'} • ${new Date(m.createdAt).toLocaleString()}</div><div style="font-size:14px;margin-top:2px">${m.message}</div></div>`).join(''):'<div style="color:#777;text-align:center;padding:15px">এখনও কোনো মেসেজ নেই।</div>'}</div>${canChat?`<form action="/request-inbox/send" method="POST" style="display:flex;gap:6px;margin-top:9px;align-items:center;flex-wrap:wrap"><input type="hidden" name="requestId" value="${r._id}"><input type="text" name="message" required maxlength="3000" placeholder="${isRequestCustomer?'Shop Admin-কে reply লিখুন...':'Customer-কে reply লিখুন...'}" style="flex:1;min-width:220px;padding:9px;border:1px solid #ccc;border-radius:8px"><button class="btn" type="submit" style="padding:8px 12px">📨 ${isRequestCustomer?'Reply':'Send'}</button></form>`:''}</div>`;
       if(!isMainAdmin(req.user)) await ProductRequestChat.updateMany({requestId:String(r._id),recipientEmail:email,isRead:false},{$set:{isRead:true}});
     }
     res.send(`<!DOCTYPE html><html><head><title>Request Inbox</title>${globalHeaderHTML}</head><body>${getNavbarHTML(req.user)}<div class="container" style="max-width:820px"><div style="background:#fff;padding:18px;border-radius:14px"><h2 style="margin-top:0">📥 Product Request Inbox</h2><p style="color:#777;font-size:13px">Customer ও Accepted Shop Admin-এর private conversation এখানে থাকবে।</p>${html||'<div style="padding:35px;text-align:center;color:#777">কোনো accepted product request নেই।</div>'}</div></div></body></html>`);
