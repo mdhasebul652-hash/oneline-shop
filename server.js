@@ -390,11 +390,15 @@ return true;
 }
 function canManageStaffData(user) { return isMainAdmin(user) || subAdminIsActive(user); }
 const ADMIN_SECTION_KEYS = ['addProduct','sellProducts','orders','users','qa','coupons','facebook','settings','subAdmin','productRequests','products','help'];
+function hasSubAdminControl(user) {
+  if (isMainAdmin(user)) return true;
+  if (isEmployee(user)) return Array.isArray(user.staffAssignedSections) && user.staffAssignedSections.includes('subAdmin');
+  return false;
+}
 function subAdminHasSection(user, section) {
   if (isMainAdmin(user)) return true;
   if (isEmployee(user)) {
     const allowed = Array.isArray(user.staffAssignedSections) ? user.staffAssignedSections : [];
-    if (section === 'subAdmin' || section === 'employeeManagement') return false;
     return allowed.includes(section);
   }
   if (!isSubAdmin(user) || !subAdminIsActive(user)) return false;
@@ -1705,7 +1709,7 @@ function openAdminSection(id){
 }
 const ADMIN_ALLOWED_SECTIONS = ${JSON.stringify(isMainAdmin(req.user)?[...ADMIN_SECTION_KEYS,'employeeManagement']:(isEmployee(req.user)?(Array.isArray(req.user.staffAssignedSections)?req.user.staffAssignedSections:[]):[...ADMIN_SECTION_KEYS.filter(k=>k!=='subAdmin'),'employeeManagement']))};
 const IS_MAIN_ADMIN = ${isMainAdmin(req.user)?'true':'false'};
-function applySectionPermissions(){ if(IS_MAIN_ADMIN)return; document.querySelectorAll('[data-section-key]').forEach(x=>{if(!ADMIN_ALLOWED_SECTIONS.includes(x.dataset.sectionKey)){x.style.display='none';x.classList.add('staff-hidden');}}); const map={productRequestsBox:'productRequests',productsBox:'products',subAdminBox:'subAdmin'}; Object.entries(map).forEach(([id,key])=>{const el=document.getElementById(id);if(el&&!ADMIN_ALLOWED_SECTIONS.includes(key)){el.style.display='none';el.classList.add('staff-hidden');}}); if(document.body.classList.contains('staff-restricted-dashboard')){ document.querySelectorAll('.admin-launch-box[data-section-key]').forEach(x=>{if(!ADMIN_ALLOWED_SECTIONS.includes(x.dataset.sectionKey)){x.style.display='none';}}); const first=ADMIN_ALLOWED_SECTIONS.find(k=>k!=='employeeManagement')||ADMIN_ALLOWED_SECTIONS[0]; const idMap={addProduct:'addProductBox',sellProducts:'sellProductsBox',orders:'ordersBox',users:'usersBox',qa:'qaBox',coupons:'couponsBox',facebook:'facebookBox',settings:'settingsBox',productRequests:'productRequestsBox',products:'productsBox',help:'mainAdminHelpBox'}; const firstId=idMap[first]; if(firstId){openAdminSection(firstId);} }}
+function applySectionPermissions(){ if(IS_MAIN_ADMIN)return; document.querySelectorAll('[data-section-key]').forEach(x=>{if(!ADMIN_ALLOWED_SECTIONS.includes(x.dataset.sectionKey)){x.style.display='none';x.classList.add('staff-hidden');}}); const map={productRequestsBox:'productRequests',productsBox:'products',subAdminBox:'subAdmin'}; Object.entries(map).forEach(([id,key])=>{const el=document.getElementById(id);if(el&&!ADMIN_ALLOWED_SECTIONS.includes(key)){el.style.display='none';el.classList.add('staff-hidden');}}); if(document.body.classList.contains('staff-restricted-dashboard')){ document.querySelectorAll('.admin-launch-box[data-section-key]').forEach(x=>{if(!ADMIN_ALLOWED_SECTIONS.includes(x.dataset.sectionKey)){x.style.display='none';}}); const first=ADMIN_ALLOWED_SECTIONS.find(k=>k!=='employeeManagement')||ADMIN_ALLOWED_SECTIONS[0]; const idMap={addProduct:'addProductBox',sellProducts:'sellProductsBox',orders:'ordersBox',users:'usersBox',qa:'qaBox',coupons:'couponsBox',facebook:'facebookBox',settings:'settingsBox',productRequests:'productRequestsBox',products:'productsBox',help:'mainAdminHelpBox',subAdmin:'subAdminBox'}; const firstId=idMap[first]; if(firstId){openAdminSection(firstId);} }}
 if(document.readyState === 'loading'){document.addEventListener('DOMContentLoaded',applySectionPermissions,{once:true});}else{applySectionPermissions();}
 function closeAdminTrunk(){
  document.querySelectorAll('details.admin-section-box').forEach(x=>x.open=false);
@@ -1751,7 +1755,7 @@ ${products.map(p => `<div class="fb-product-option" data-id="${p._id}" onclick="
 <small style="display:block;color:#777;margin-bottom:10px;">Reel-এর জন্য Meta-এর নির্ধারিত Reel video requirements পূরণ করতে হবে।</small>
 <button type="submit" class="btn" style="padding:9px 16px;">🚀 Publish Directly to Facebook</button>
 </form>
-</div> <hr style="margin:20px 0;"> </div></details> <details class="admin-section-box" id="settingsBox" data-section-key="settings"><summary>🛠️ Site Settings & Payment</summary><div class="admin-section-body"><h3 id="settingsSec">Site Settings & Payment Numbers</h3> <form action="/admin/update-settings" method="POST" style="background:#f9f9f9; padding:15px; border-radius:6px; margin-bottom:20px;"> <label style="font-size:13px;">bKash Number:</label><br> <input type="text" name="bkashNumber" value="${siteSetting.bkashNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br> <label style="font-size:13px;">Nagad Number:</label><br> <input type="text" name="nagadNumber" value="${siteSetting.nagadNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br> <hr style="margin:15px 0; border:0; border-top:1px solid #ddd;"> <h4 style="margin:5px 0 8px 0;">📘 Facebook API Settings</h4> <label style="font-size:13px;">Facebook Page ID:</label><br> <input type="text" name="pageId" value="${siteSetting.pageId || ''}" placeholder="Facebook Page ID" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><br> <label style="font-size:13px;">Facebook Page Access Token:</label><br> <input type="password" name="accessToken" placeholder="নতুন Page Access Token দিলে সেটি Save হবে; খালি রাখলে আগের Token থাকবে" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><small style="display:block;color:#777;margin-bottom:10px;">Token কাউকে দেবেন না। এটি শুধু server-side Facebook API call-এর জন্য ব্যবহৃত হবে।</small> <button type="submit" class="btn" style="padding:8px 16px;">Update Settings</button> </form> </div></details> ${isMainAdmin(req.user) ? `<details class="admin-section-box" id="subAdminBox" data-section-key="subAdmin"><summary>🛡️ Sub Admin Control Center</summary><div class="admin-section-body"><h3 id="subAdminSec">🛡️ Sub Admin Control Center</h3>
+</div> <hr style="margin:20px 0;"> </div></details> <details class="admin-section-box" id="settingsBox" data-section-key="settings"><summary>🛠️ Site Settings & Payment</summary><div class="admin-section-body"><h3 id="settingsSec">Site Settings & Payment Numbers</h3> <form action="/admin/update-settings" method="POST" style="background:#f9f9f9; padding:15px; border-radius:6px; margin-bottom:20px;"> <label style="font-size:13px;">bKash Number:</label><br> <input type="text" name="bkashNumber" value="${siteSetting.bkashNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br> <label style="font-size:13px;">Nagad Number:</label><br> <input type="text" name="nagadNumber" value="${siteSetting.nagadNumber}" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;" required><br> <hr style="margin:15px 0; border:0; border-top:1px solid #ddd;"> <h4 style="margin:5px 0 8px 0;">📘 Facebook API Settings</h4> <label style="font-size:13px;">Facebook Page ID:</label><br> <input type="text" name="pageId" value="${siteSetting.pageId || ''}" placeholder="Facebook Page ID" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><br> <label style="font-size:13px;">Facebook Page Access Token:</label><br> <input type="password" name="accessToken" placeholder="নতুন Page Access Token দিলে সেটি Save হবে; খালি রাখলে আগের Token থাকবে" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px;"><small style="display:block;color:#777;margin-bottom:10px;">Token কাউকে দেবেন না। এটি শুধু server-side Facebook API call-এর জন্য ব্যবহৃত হবে।</small> <button type="submit" class="btn" style="padding:8px 16px;">Update Settings</button> </form> </div></details> ${hasSubAdminControl(req.user) ? `<details class="admin-section-box" id="subAdminBox" data-section-key="subAdmin"><summary>🛡️ Sub Admin Control Center</summary><div class="admin-section-body"><h3 id="subAdminSec">🛡️ Sub Admin Control Center</h3>
 <div class="sub-admin-control-center" style="background:linear-gradient(135deg,#fff,#f7f9fc);padding:14px;border:1px solid #e5e7eb;border-radius:14px;margin-bottom:20px;box-shadow:0 3px 12px rgba(0,0,0,.05);">
 <style>
 .sub-admin-box-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:14px}
@@ -1858,7 +1862,7 @@ app.post('/admin/staff/create', async(req,res,next)=>{ try {
   if(!email||!name||password.length<6) return res.status(400).send('Name, valid email and password (6+ chars) are required.');
   if(await User.findOne({email})) return res.status(400).send('এই Email দিয়ে account আগে থেকেই আছে।');
   const raw=req.body.sections; const requested=Array.isArray(raw)?raw:(raw?[raw]:[]);
-  const parentAllowed=isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(isSubAdmin(req.user)?ADMIN_SECTION_KEYS.filter(k=>k!=='subAdmin'):(Array.isArray(req.user.adminSections)?req.user.adminSections:[]));
+  const parentAllowed=isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(isSubAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[]));
   const sections=requested.map(String).filter(x=>parentAllowed.includes(x));
   if(!sections.length) return res.status(400).send('কমপক্ষে একটি assigned section নির্বাচন করুন।');
   const hash=await bcrypt.hash(password,10);
@@ -1879,7 +1883,7 @@ app.post('/admin/staff/permissions/:id', async(req,res,next)=>{ try {
   if(!isMainAdmin(req.user) && !(isSubAdmin(req.user)&&subAdminIsActive(req.user))) return res.status(403).send('Unauthorized');
   const st=await User.findOne({_id:req.params.id,role:'staff',staffParentAdminId:String(req.user._id)}); if(!st) return res.status(404).send('Employee not found');
   const raw=req.body.sections; const requested=Array.isArray(raw)?raw:(raw?[raw]:[]);
-  const parentAllowed=isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(isSubAdmin(req.user)?ADMIN_SECTION_KEYS.filter(k=>k!=='subAdmin'):(Array.isArray(req.user.adminSections)?req.user.adminSections:[]));
+  const parentAllowed=isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(isSubAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[]));
   const sections=requested.map(String).filter(x=>parentAllowed.includes(x));
   if(!sections.length) return res.status(400).send('কমপক্ষে একটি assigned section রাখুন।');
   st.staffAssignedSections=sections; st.staffPwaSection=sections[0]; await st.save(); res.redirect('/admin-dashboard#staffBox');
@@ -1900,9 +1904,9 @@ app.get('/admin/employee-activity', async(req,res,next)=>{
 
 // ================= Main Admin Sub Admin Control Routes =================
 app.post('/sub-admin/support', async (req,res,next)=>{ try { if(!isSubAdmin(req.user)) return res.redirect('/login'); const message=String(req.body.message||'').trim(); const requestedWhatsApp=String(req.body.requestedWhatsApp||'').trim(); if(!message) return res.redirect('/admin-dashboard'); if(requestedWhatsApp && !isValidWhatsAppContact(requestedWhatsApp)) return res.send(`<script>alert('সঠিক WhatsApp Number / wa.me Link দিন।');window.history.back();</script>`); await new SubAdminSupport({subAdminId:String(req.user._id),subAdminEmail:req.user.email,message,requestedWhatsApp,whatsappUpdateStatus:requestedWhatsApp?'pending':'none'}).save(); res.redirect('/admin-dashboard'); } catch(e){next(e);} });
-app.post('/admin/subadmin/update-whatsapp/:id', async (req,res,next)=>{ try { if(!isMainAdmin(req.user)) return res.status(403).send('Unauthorized: Main Admin access required'); const whatsapp=String(req.body.whatsapp||'').trim(); if(!isValidWhatsAppContact(whatsapp)) return res.status(400).send('Invalid WhatsApp number or wa.me link'); const sa=await User.findOne({_id:req.params.id,role:'subadmin'}); if(!sa) return res.status(404).send('Sub Admin not found'); sa.subAdminWhatsApp=whatsapp; await sa.save(); await SubAdminSupport.updateMany({subAdminId:String(sa._id),requestedWhatsApp:whatsapp,whatsappUpdateStatus:'pending'},{$set:{whatsappUpdateStatus:'approved',updatedAt:new Date()}}); res.redirect('/admin-dashboard#subAdminSec'); } catch(e){next(e);} });
+app.post('/admin/subadmin/update-whatsapp/:id', async (req,res,next)=>{ try { if(!hasSubAdminControl(req.user)) return res.status(403).send('Unauthorized: Sub Admin Control Center access required'); const whatsapp=String(req.body.whatsapp||'').trim(); if(!isValidWhatsAppContact(whatsapp)) return res.status(400).send('Invalid WhatsApp number or wa.me link'); const sa=await User.findOne({_id:req.params.id,role:'subadmin'}); if(!sa) return res.status(404).send('Sub Admin not found'); sa.subAdminWhatsApp=whatsapp; await sa.save(); await SubAdminSupport.updateMany({subAdminId:String(sa._id),requestedWhatsApp:whatsapp,whatsappUpdateStatus:'pending'},{$set:{whatsappUpdateStatus:'approved',updatedAt:new Date()}}); res.redirect('/admin-dashboard#subAdminSec'); } catch(e){next(e);} });
 app.post('/admin/login-help/reset/:id', async(req,res,next)=>{try{
-  if(!isMainAdmin(req.user)) return res.status(403).send('Unauthorized: Main Admin access required');
+  if(!hasSubAdminControl(req.user)) return res.status(403).send('Unauthorized: Sub Admin Control Center access required');
   const newPassword=String(req.body.newPassword||'');
   if(newPassword.length<6) return res.status(400).send('New password must be at least 6 characters');
   const ticket=await SubAdminSupport.findById(req.params.id);
@@ -1913,10 +1917,10 @@ app.post('/admin/login-help/reset/:id', async(req,res,next)=>{try{
   ticket.resetStatus='completed'; ticket.resetAt=new Date(); ticket.reply='Password reset completed by Main Admin. A new password was set securely.'; ticket.updatedAt=new Date(); await ticket.save();
   res.redirect('/admin-dashboard#subAdminSec');
 }catch(e){next(e);}});
-app.post('/admin/subadmin/support/:id', async (req,res,next)=>{ try { if(!isMainAdmin(req.user)) return res.status(403).send('Unauthorized: Main Admin access required'); const ticket=await SubAdminSupport.findById(req.params.id); if(!ticket) return res.status(404).send('Support request not found'); const reply=safeText(req.body.reply,2000); ticket.reply=reply; ticket.updatedAt=new Date(); await ticket.save(); if(reply){ await new Chat({productId:null,productName:'Main Admin Help / Support',ownerId:String(ticket.subAdminId),productImage:'',userEmail:normalizeEmail(ticket.subAdminEmail),message:reply,reply:'',senderRole:'admin',senderEmail:normalizeEmail(req.user.email),recipientEmail:normalizeEmail(ticket.subAdminEmail),isRead:false}).save(); await createNotification(normalizeEmail(ticket.subAdminEmail),'Main Admin Reply',reply,'/messages','message'); } res.redirect('/admin-dashboard#subAdminSec'); } catch(e){next(e);} });
+app.post('/admin/subadmin/support/:id', async (req,res,next)=>{ try { if(!hasSubAdminControl(req.user)) return res.status(403).send('Unauthorized: Sub Admin Control Center access required'); const ticket=await SubAdminSupport.findById(req.params.id); if(!ticket) return res.status(404).send('Support request not found'); const reply=safeText(req.body.reply,2000); ticket.reply=reply; ticket.updatedAt=new Date(); await ticket.save(); if(reply){ await new Chat({productId:null,productName:'Main Admin Help / Support',ownerId:String(ticket.subAdminId),productImage:'',userEmail:normalizeEmail(ticket.subAdminEmail),message:reply,reply:'',senderRole:'admin',senderEmail:normalizeEmail(req.user.email),recipientEmail:normalizeEmail(ticket.subAdminEmail),isRead:false}).save(); await createNotification(normalizeEmail(ticket.subAdminEmail),'Main Admin Reply',reply,'/messages','message'); } res.redirect('/admin-dashboard#subAdminSec'); } catch(e){next(e);} });
 app.post('/admin/subadmin/action/:id', async (req,res,next)=>{
   try {
-    if (!requireMainAdmin(req,res)) return;
+    if (!hasSubAdminControl(req.user)) return res.status(403).send('Unauthorized: Sub Admin Control Center access required');
     const action=String(req.body.action||'').trim().toLowerCase();
     const sa=await User.findOne({_id:req.params.id,role:'subadmin'});
     if(!sa) return res.status(404).send('Sub Admin not found');
@@ -1951,7 +1955,7 @@ app.post('/admin/subadmin/action/:id', async (req,res,next)=>{
 
 app.post('/admin/subadmin/message/:id', async (req,res,next)=>{
   try {
-    if (!requireMainAdmin(req,res)) return;
+    if (!hasSubAdminControl(req.user)) return res.status(403).send('Unauthorized: Sub Admin Control Center access required');
     const sa=await User.findOne({_id:req.params.id,role:'subadmin'});
     if(!sa) return res.status(404).send('Sub Admin not found');
     const message=safeText(req.body.message,2000);
