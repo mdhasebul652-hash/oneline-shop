@@ -1904,7 +1904,7 @@ ${products.map(p => `<div class="fb-product-option" data-id="${p._id}" onclick="
 <div id="selectedFacebookProduct" style="display:none; margin:8px 0 12px 0; padding:10px; border:2px solid #f85606; border-radius:6px; background:#fff7f2;"></div>
 <br>
 <label style="font-size:13px;">Image / Video File:</label><br>
-<input type="file" name="mediaFile" accept="image/*,video/*" style="margin:3px 0 10px 0;" required><br>
+<input type="file" name="mediaFile" accept="image/*,video/*" style="margin:3px 0 10px 0;"><br>
 <small style="display:block;color:#777;margin-bottom:10px;">Reel-এর জন্য Meta-এর নির্ধারিত Reel video requirements পূরণ করতে হবে।</small>
 <button type="submit" class="btn" style="padding:9px 16px;">🚀 Publish Directly to Facebook</button>
 </form>
