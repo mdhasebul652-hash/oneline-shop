@@ -1,4 +1,4 @@
-// V70: Dedicated Admin↔Sub Admin message thread + Quick Customer Management assignment. Base: V69.
+// V71: Employee PWA/login hard lock + customer-home separation. Base: V70.
 // Preserves V69 search/scroll/reply fixes and all prior features.
 require('dotenv').config();
 const express = require('express');
@@ -479,28 +479,50 @@ next();
 });
 
 // ================= Employee Restricted Navigation =================
-// Employees must stay inside their assigned Admin section. They can still load
-// the admin dashboard and required static/API resources, while ordinary shop
-// pages are redirected back to their assigned work area.
+// Employees are operational accounts, not customer accounts. Once an employee
+// is logged in, browser/PWA navigation is locked to the assigned Admin work area.
+// Customer-facing pages such as /, /product/*, /cart, /dashboard, /my-orders,
+// /wishlist and /search are intentionally NOT available to employees.
 function employeeFirstSection(user) {
   const allowed = Array.isArray(user && user.staffAssignedSections) ? user.staffAssignedSections : [];
   return allowed[0] || 'addProduct';
 }
-function isEmployeePublicShopPath(path) {
-  return path === '/' || path.startsWith('/category/') || path.startsWith('/product/') ||
-    path === '/cart' || path.startsWith('/cart/') || path === '/wishlist' || path.startsWith('/wishlist/') ||
-    path === '/my-orders' || path.startsWith('/my-orders/') || path === '/dashboard' || path.startsWith('/dashboard/') ||
-    path === '/messages' || path.startsWith('/messages/') ||
-    path === '/notifications' || path.startsWith('/notifications/') || path.startsWith('/search');
+function employeeAllowedNavigationPath(path) {
+  return path === '/admin-dashboard' ||
+    path === '/admin/sell-products' ||
+    path === '/admin/add-product' ||
+    path === '/admin/orders' ||
+    path === '/admin/users' ||
+    path === '/admin/customer-management' ||
+    path === '/admin/qa' ||
+    path === '/admin/coupons' ||
+    path === '/admin/facebook' ||
+    path === '/admin/settings' ||
+    path === '/admin/product-requests' ||
+    path === '/admin/products' ||
+    path === '/admin/help' ||
+    path === '/admin/tiktok' ||
+    path === '/login' ||
+    path === '/logout' ||
+    path === '/manifest.json' ||
+    path === '/staff-manifest.webmanifest' ||
+    path === '/sw.js' ||
+    path === '/pwa-icon-192.png' ||
+    path === '/pwa-icon-512.png';
 }
 app.use((req, res, next) => {
   if (!req.user || !isEmployee(req.user)) return next();
   if (!Array.isArray(req.user.staffAssignedSections) || !req.user.staffAssignedSections.length) {
     return res.status(403).send('<div style="font-family:Arial;padding:30px;max-width:700px;margin:auto"><h2>Employee Access Not Assigned</h2><p>আপনার account-এ এখনো কোনো কাজের section দেওয়া হয়নি। Admin-এর কাছে section assign করতে বলুন।</p></div>');
   }
-  // Fix: শুধু /login থেকে redirect করো — homepage (/) বা অন্য public page থেকে নয়
-  // Employee চাইলে homepage দেখতে পারবে, শুধু login page-এ গেলে dashboard-এ যাবে
+  // Already-logged-in employee visiting Login must return to their assigned work area.
   if (req.path === '/login') {
+    return res.redirect('/admin-dashboard?staff=1&section=' + encodeURIComponent(employeeFirstSection(req.user)));
+  }
+  // Block customer-facing HTML pages and every other direct browser navigation.
+  // POST/API calls used by the assigned Admin section are still handled by their
+  // existing requireAdminSection() guards below.
+  if (req.method === 'GET' && req.headers.accept && req.headers.accept.includes('text/html') && !employeeAllowedNavigationPath(req.path)) {
     return res.redirect('/admin-dashboard?staff=1&section=' + encodeURIComponent(employeeFirstSection(req.user)));
   }
   next();
@@ -2797,15 +2819,22 @@ app.get('/notifications', async (req,res,next)=>{
 
 // ================= PWA / Installable Web App =================
 app.get('/manifest.json', (req, res) => {
+  // The same site link remains the normal customer app, but when an employee is
+  // signed in Chrome sees a staff-only manifest whose PWA opens the assigned work area.
+  const isStaffUser = !!(req.user && isEmployee(req.user));
+  const section = isStaffUser ? employeeFirstSection(req.user) : '';
+  const labels = {addProduct:'Add Product',sellProducts:'Sell Products',orders:'Manage Orders',customerManagement:'Customer Management',users:'Customer Management',qa:'Q&A',coupons:'Coupons',facebook:'Facebook',settings:'Site Settings',productRequests:'Product Requests',products:'All Products',help:'Main Admin Help',tiktok:'TikTok'};
+  const label = labels[section] || 'Staff Work';
+  res.set('Cache-Control','no-store, private, max-age=0');
   res.type('application/manifest+json').send(JSON.stringify({
-    name: 'Online Shop',
-    short_name: 'Online Shop',
-    start_url: '/',
+    name: isStaffUser ? ('Online Shop — ' + label) : 'Online Shop',
+    short_name: isStaffUser ? label : 'Online Shop',
+    start_url: isStaffUser ? ('/admin-dashboard?staff=1&section=' + encodeURIComponent(section)) : '/',
     scope: '/',
     display: 'standalone',
     background_color: '#f4f4f4',
     theme_color: '#f85606',
-    description: 'Online Shop Marketplace',
+    description: isStaffUser ? 'Assigned employee work area' : 'Online Shop Marketplace',
     icons: [
       { src: '/pwa-icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
       { src: '/pwa-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
@@ -2814,7 +2843,8 @@ app.get('/manifest.json', (req, res) => {
 });
 
 app.get('/sw.js', (req, res) => {
-  res.type('application/javascript').send(`const CACHE_NAME='online-shop-v35-employee-fix-v1';
+  res.set('Cache-Control','no-store, no-cache, must-revalidate, max-age=0');
+  res.type('application/javascript').send(`const CACHE_NAME='online-shop-v36-staff-lock-v1';
 self.addEventListener('install',event=>{self.skipWaiting();});
 self.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});
 self.addEventListener('fetch',event=>{
@@ -2822,7 +2852,8 @@ self.addEventListener('fetch',event=>{
   const url=new URL(event.request.url);
   if(url.origin!==self.location.origin) return;
   if(event.request.mode==='navigate'){
-    event.respondWith(fetch(event.request).catch(()=>caches.match('/')));
+    // Never fall back to the customer homepage for an installed staff app.
+    event.respondWith(fetch(event.request).catch(()=>caches.match(event.request)));
   }
 });`);
 });
