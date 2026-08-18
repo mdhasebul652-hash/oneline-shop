@@ -458,24 +458,62 @@ const items = Array.isArray(order && order.items) ? order.items : [];
 return items.length > 0 && items.every(item => String(item.ownerId || '') === dataOwnerId(user));
 }
 
-// Middleware to load logged-in user
+// ================= Separate Customer / Staff Sessions =================
+// Chrome customer login and the installed Staff PWA must NOT share the same
+// authentication identity. They are on the same origin, so we keep two
+// different cookies and select the correct one from the route context.
+function wantsStaffSession(req) {
+  const p = String(req.path || '');
+  return p === '/staff-login' ||
+    p === '/staff-logout' ||
+    p === '/staff-manifest.webmanifest' ||
+    p === '/api/staff-login' ||
+    p === '/api/staff-app-context' ||
+    p === '/api/product-requests' ||
+    p === '/admin-dashboard' ||
+    p.startsWith('/admin/');
+}
+
+async function loadSessionUser(raw) {
+  try {
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || !data.email) return null;
+    return await User.findOne({ email: normalizeEmail(data.email) });
+  } catch (_) {
+    return null;
+  }
+}
+
+// Middleware to load the correct session. Customer pages intentionally ignore
+// old employee userSession cookies; this is what prevents an Employee login
+// from leaking into the normal Chrome shop.
 app.use(async (req, res, next) => {
-try {
-if (req.cookies && req.cookies.userSession) {
-let sessionData = JSON.parse(req.cookies.userSession);
-let user = await User.findOne({ email: sessionData.email });
-if (user) {
-if (user.role === 'subadmin' && user.subAdminStatus === 'active' && !user.unlimitedFree && user.activationExpiresAt && new Date(user.activationExpiresAt).getTime() < Date.now()) {
-user.subAdminStatus = 'expired';
-await user.save();
-}
-req.user = user;
-}
-}
-} catch (e) {
-req.user = null;
-}
-next();
+  try {
+    const staffContext = wantsStaffSession(req);
+    const raw = staffContext ? req.cookies?.staffSession : req.cookies?.userSession;
+    const user = await loadSessionUser(raw);
+    if (user) {
+      if (user.role === 'subadmin' && user.subAdminStatus === 'active' && !user.unlimitedFree && user.activationExpiresAt && new Date(user.activationExpiresAt).getTime() < Date.now()) {
+        user.subAdminStatus = 'expired';
+        await user.save();
+      }
+      // A staff session is only valid for employee/admin work. A normal
+      // customer request can never become an Employee merely because an old
+      // userSession cookie still exists.
+      if (!staffContext && user.role === 'staff') {
+        req.user = null;
+      } else {
+        req.user = user;
+      }
+    } else {
+      req.user = null;
+    }
+    req.staffSessionContext = staffContext;
+  } catch (e) {
+    req.user = null;
+  }
+  next();
 });
 
 // ================= V72 Employee / Browser / Installed-PWA Navigation =================
@@ -639,24 +677,25 @@ const globalHeaderHTML = ` <link rel="manifest" href="/manifest.json"><meta name
   const standalone = !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
   if(!standalone) return;
   fetch('/api/staff-app-context',{cache:'no-store',credentials:'same-origin'})
-    .then(r=>r.ok?r.json():null)
+    .then(r=>r.ok?r.json():{employee:false})
     .then(d=>{
-      if(!d || !d.employee || !d.assigned) return;
+      if(!d || !d.employee || !d.assigned){
+        if(location.pathname !== '/staff-login') location.replace('/staff-login');
+        return;
+      }
       const section=encodeURIComponent(d.section || 'addProduct');
       const allowedAdmin = location.pathname === '/admin-dashboard' || location.pathname.startsWith('/admin/');
       if(!allowedAdmin){
         location.replace('/admin-dashboard?staff=1&section='+section);
         return;
       }
-      // If the app is on an Admin section that is not assigned to this employee,
-      // force it back to the employee's first assigned section.
       const qs=new URLSearchParams(location.search);
       const current=qs.get('section');
       if(location.pathname === '/admin-dashboard' && current && Array.isArray(d.allowedSections) && !d.allowedSections.includes(current)){
         location.replace('/admin-dashboard?staff=1&section='+section);
       }
     })
-    .catch(()=>{});
+    .catch(()=>{ if(location.pathname !== '/staff-login') location.replace('/staff-login'); });
 })();
 </script> <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>`;
 const getNavbarHTML = (user) => ` <header> <a href="/" class="logo">🛒Online Shop</a> <form action="/search" method="GET" class="search-bar"> <input type="text" name="q" placeholder="Search in Online Shop..." required> <button type="submit">🔍</button> </form> </header> <div class="categories-nav"> <a href="/">🔥All</a> <a href="/category/Fashion">👗ফ্যাশন</a> <a href="/category/Supershop">🛒সুপার শপ</a> <a href="/category/Pharmacy">💊ফার্মেসি</a> <a href="/category/Food">🍲খাদ্যপণ্য</a> <a href="/category/Sports">⚽স্পোর্ট স</a> <a href="/category/Books">📚বই</a> <a href="/category/Stationery">✏️স্টেশনারি</a> <a href="/category/HomeDecor">🛋️হোম ডেকোর ও ফার্নিচার</a> <a href="/category/BeautyCare">💄বিউটি পার্লার কেয়ার</a> <a href="/category/Electric">⚡ইলেকট্রিক</a> </div> <div class="bottom-nav"> <a href="/"><span>🏠</span>Home</a> <a href="/wishlist"><span>❤️</span>Wishlist</a> <a href="/cart"><span>🛒</span>Cart</a> <a href="/my-orders"><span>📦</span>Orders</a> ${user ? `<a href="/notifications" style="position:relative;"><span>🔔</span>Alerts <b id="notificationBadge" style="display:none;position:absolute;top:-3px;right:8px;background:#dc3545;color:#fff;border-radius:20px;padding:1px 5px;font-size:9px;">0</b></a><a href="/request-inbox" style="position:relative;"><span>📥</span>Inbox <b id="requestInboxBadge" style="display:none;position:absolute;top:-3px;right:8px;background:#dc3545;color:#fff;border-radius:20px;padding:1px 5px;font-size:9px;">0</b></a><a href="/dashboard"><span>👤</span>Account</a>` : `<a href="/login"><span>🔑</span>Login</a>`} ${user && ((isMainAdmin(user)) || (user.role === 'subadmin' && subAdminIsActive(user))) ? `<a href="/admin-dashboard"><span>⚙️</span>${isMainAdmin(user) ? 'Admin' : 'Seller Admin'}</a>` : ''} </div> ${user ? `<script>(async()=>{try{const r=await fetch('/api/request-chat/unread-count');const d=await r.json();const b=document.getElementById('requestInboxBadge');if(b&&d.count>0){b.textContent=d.count>99?'99+':d.count;b.style.display='inline-block';};const nr=await fetch('/api/notifications/unread-count');const nd=await nr.json();const nb=document.getElementById('notificationBadge');if(nb&&nd.count>0){nb.textContent=nd.count>99?'99+':nd.count;nb.style.display='inline-block';}}catch(e){}})();</script>` : ''} ${user && user.role !== 'admin' ? `
@@ -1504,6 +1543,29 @@ app.get('/api/product-requests', async (req,res,next) => {
 });
 
 // ================= User Authentication & Dashboard =================
+// ================= Staff PWA Login =================
+app.get('/staff-login', (req, res) => {
+  if (req.user && isEmployee(req.user)) {
+    return res.redirect('/admin-dashboard?staff=1&section=' + encodeURIComponent(employeeFirstSection(req.user)));
+  }
+  res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Employee Work Area</title>${globalHeaderHTML}</head><body><div class="container" style="max-width:380px;background:#fff;padding:22px;border-radius:12px;margin:30px auto;box-shadow:0 2px 10px rgba(0,0,0,.08)"><h2 style="margin-top:0">👷 Employee Work Area</h2><p style="font-size:13px;color:#666">এই Login শুধু আপনার Installed Employee App-এর জন্য। Chrome-এর সাধারণ Online Shop login এর সঙ্গে এটি আলাদা থাকবে।</p><form action="/api/staff-login" method="POST"><label>Email</label><input type="email" name="email" required style="width:100%;padding:10px;margin:5px 0 12px;border:1px solid #ccc;border-radius:7px"><label>Website Password</label><input type="password" name="password" required style="width:100%;padding:10px;margin:5px 0 15px;border:1px solid #ccc;border-radius:7px"><button class="btn" style="width:100%">🔐 Employee Login</button></form><p style="font-size:11px;color:#777;margin-top:12px">Employee Management-এ দেওয়া Email ও Website Password ব্যবহার করুন। Gmail-এর আসল Password নয়।</p></div></body></html>`);
+});
+
+app.post('/api/staff-login', async (req,res,next)=>{
+  try {
+    if(!dbReady()) return res.status(503).send('<script>alert("Database এখনো সংযুক্ত হয়নি।");location.href="/staff-login";</script>');
+    const email=normalizeEmail(req.body.email);
+    const password=String(req.body.password||'');
+    const user=await User.findOne({email});
+    if(!user || !isEmployee(user) || !(await verifyWebsiteLoginPassword(user,password))) {
+      return res.send('<script>alert("Employee Email অথবা Website Password সঠিক নয়।");location.href="/staff-login";</script>');
+    }
+    res.cookie('staffSession', JSON.stringify({email:user.email,role:user.role}), {httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',maxAge:30*24*60*60*1000});
+    res.clearCookie('userSession');
+    res.redirect('/admin-dashboard?staff=1&section='+encodeURIComponent(employeeFirstSection(user)));
+  } catch(e){ next(e); }
+});
+
 app.get('/login', (req, res) => {
 let redirectUrl = req.query.redirect || '/';
 res.send(` <!DOCTYPE html> <html> <head><title>Login</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="max-width:350px; background:white; padding:20px; border-radius:6px; margin-top:30px; box-shadow:0 2px 5px rgba(0,0,0,0.1);"> <h3 style="margin-top:0;">Login</h3> <form action="/api/login" method="POST"> <input type="hidden" name="redirect" value="${redirectUrl}"> <label style="font-size:13px; font-weight:600;">Email:</label><br> <input type="email" name="email" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600;">Password:</label><br><div style="position:relative;"><input id="loginPassword" type="password" name="password" style="width:100%; padding:10px 42px 10px 10px; margin:4px 0 15px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><button type="button" onclick="toggleLoginPassword()" aria-label="Show password" style="position:absolute;right:6px;top:6px;border:0;background:transparent;font-size:20px;cursor:pointer;">👁️</button></div> <button type="submit" class="btn" style="width:100%; padding:10px;">Login</button> </form><div style="margin-top:12px;padding:10px;background:#fff8e1;border:1px solid #ffe08a;border-radius:7px;font-size:12px;"><b>🔑 Password ভুলে গেছেন?</b><br><a href="/login-help" style="color:#007bff;">Admin Help-এ Password Reset Request পাঠান</a></div><div style="margin-top:10px;padding:9px;background:#eef7ff;border:1px solid #cfe8ff;border-radius:7px;font-size:12px;"><b>👷 Employee Login:</b> Employee Management-এ দেওয়া Email এবং Website Password ব্যবহার করুন। Gmail-এর আসল password ব্যবহার করবেন না।</div><p style="font-size:13px; text-align:center; margin-top:15px;">New user? <a href="/register?redirect=${encodeURIComponent(redirectUrl)}">Register here</a></p><script>function toggleLoginPassword(){const x=document.getElementById('loginPassword');if(x)x.type=x.type==='password'?'text':'password';}</script> </div> </body> </html> `);
@@ -1556,10 +1618,19 @@ if (!user || !passwordOk) {
 if (user.role === 'staff' && !isEmployee(user)) {
   return res.send(`<script>alert('এই Employee account বর্তমানে Active নয়। Main Admin/Sub Admin-এর কাছে account status যাচাই করুন।'); window.location.href='/login';</script>`);
 }
-// Keep the login redirect normal. If this login was completed inside the
-// installed Staff PWA, its standalone client lock will immediately open the
-// assigned Admin section. In ordinary Chrome, the user stays on the shop site.
+// Employee authentication is kept in its own Staff session. Customer login
+// remains in userSession, so the same Chrome profile can hold both identities
+// without one replacing the other.
+if (isEmployee(user)) {
+  res.clearCookie('userSession');
+  res.cookie('staffSession', JSON.stringify({ email: user.email, role: user.role }), { httpOnly:true, sameSite:'lax', secure: process.env.NODE_ENV === 'production', maxAge: 30*24*60*60*1000 });
+  const staffRedirect = '/admin-dashboard?staff=1&section=' + encodeURIComponent(employeeFirstSection(user));
+  return res.redirect(staffRedirect);
+}
 res.cookie('userSession', JSON.stringify({ email: user.email, role: user.role }));
+if (isMainAdmin(user) || isSubAdmin(user)) {
+  res.cookie('staffSession', JSON.stringify({ email: user.email, role: user.role }), { httpOnly:true, sameSite:'lax', secure: process.env.NODE_ENV === 'production', maxAge: 30*24*60*60*1000 });
+}
 const safeRedirect = (typeof redirect === 'string' && redirect.startsWith('/')) ? redirect : '/';
 res.redirect(safeRedirect);
 } catch (err) {
@@ -1645,6 +1716,11 @@ app.get('/logout', (req, res) => {
 res.clearCookie('userSession');
 res.redirect('/');
 });
+app.get('/staff-logout', (req, res) => {
+res.clearCookie('staffSession');
+res.redirect('/staff-login');
+});
+
 app.get('/dashboard', async (req, res, next) => {
 try {
 if (!req.user) return res.redirect('/login');
@@ -1779,7 +1855,7 @@ app.get('/staff-manifest.webmanifest', async (req,res,next)=>{
     const labels={addProduct:'Add Product',sellProducts:'Sell Products',orders:'Manage Orders',customerManagement:'Quick Customer Management',users:'Quick Customer Management',qa:'Q&A & Messages',coupons:'Coupons',facebook:'Facebook',settings:'Site Settings',productRequests:'Customer Product Requests',products:'All Products',help:'Main Admin Help',tiktok:'TikTok'};
     res.set('Content-Type','application/manifest+json');
     res.set('Cache-Control','no-store, private, max-age=0');
-    res.json({name:'Online Shop — '+(labels[section]||'Staff Work'),short_name:labels[section]||'Staff',start_url:'/admin-dashboard#'+section+'Sec',scope:'/',display:'standalone',background_color:'#f4f4f4',theme_color:'#f85606',description:'Assigned staff section'});
+    res.json({name:'Online Shop — '+(labels[section]||'Staff Work'),short_name:labels[section]||'Staff',start_url:'/staff-login',scope:'/',display:'standalone',background_color:'#f4f4f4',theme_color:'#f85606',description:'Assigned staff section'});
   }catch(e){next(e);}
 });
 
@@ -1877,7 +1953,7 @@ const tiktokConnected = !!siteSetting.tiktokAccessToken;
 const tiktokSectionHTML = `<details class="admin-section-box" id="tiktokBox" data-section-key="tiktok"><summary>🎵 TikTok Direct Posting</summary><div class="admin-section-body"><h3 id="tiktokSec">🎵 TikTok Direct Posting</h3>`+
 `<div style="background:#fff8f0;border:1px solid #ffd8b5;border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;"><b>গুরুত্বপূর্ণ:</b> TikTok-এ সরাসরি publish করতে TikTok Developer App, Login Kit এবং <code>video.publish</code> permission/approval প্রয়োজন। Website-এর password এখানে রাখা হবে না; TikTok OAuth দিয়ে account connect হবে।</div>`+
 `<div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:14px;"><b>Connection:</b> ${tiktokConnected?'<span style="color:#198754;font-weight:700">Connected</span> — Open ID: '+tiktokEsc(siteSetting.tiktokOpenId||'N/A'):'<span style="color:#777">Not connected</span>'}</div>`+
-`<div style="background:#f6f8ff;border:1px solid #dbe3ff;border-radius:10px;padding:12px;margin-top:10px;"><b>🔐 TikTok Connection Setup</b><p style="margin:6px 0;color:#555;font-size:12px;">এই ঘরগুলোতে TikTok Developer App-এর Client Key ও Client Secret দিন। TikTok account-এর password এখানে দেবেন না। Save করার পর Connect TikTok Account চাপুন।</p><form action="/admin/tiktok/save-config" method="POST" style="display:grid;gap:7px;"><input name="tiktokClientKey" value="${tiktokEsc(siteSetting.tiktokClientKey||'')}" placeholder="TikTok Client Key" required style="padding:8px;border:1px solid #ccc;border-radius:6px;display:none;"><input type="password" name="tiktokClientSecret" placeholder="TikTok Client Secret (নতুন হলে দিন)" style="padding:8px;border:1px solid #ccc;border-radius:6px;display:none;"><small style="color:#777;display:none;">Client Secret আগে Save করা থাকলে খালি রাখলেও আগেরটি থাকবে।</small><div style="font-size:12px;background:#fff;padding:7px;border-radius:6px;border:1px solid #eee;word-break:break-all;display:none;"><b>Redirect URI:</b> ${tiktokEsc(TIKTOK_REDIRECT_URI)}</div><button class="btn" style="background:#198754;color:#fff;padding:8px 12px;">💾 Save TikTok Connection</button></form></div>`+
+`<div style="background:#f6f8ff;border:1px solid #dbe3ff;border-radius:10px;padding:12px;margin-top:10px;"><b>🔐 TikTok Connection Setup</b><p style="margin:6px 0;color:#555;font-size:12px;">অ্যাডমিন আপনাদের সুবিধার জন্য TikTok Account Connect করার ব্যবস্থা করে রেখেছেন। এখানে আপনাদের নিজের TikTok account-টি নিরাপদভাবে সংযুক্ত ও যাচাই করতে নিচের “Connect TikTok Account” বাটনে ক্লিক করুন। এরপর আপনার নিজের TikTok ID দিয়ে TikTok-এ লগইন/অনুমোদন সম্পন্ন করুন। Account Connect হয়ে গেলে আপনার অনুমোদিত TikTok account ব্যবহার করে এখান থেকে ভিডিও প্রকাশ করতে পারবেন এবং সাইটে থাকা প্রয়োজনীয় Product/Content TikTok-এ শেয়ার করতে পারবেন। আপনার TikTok password এই ওয়েবসাইটে দিতে হবে না—TikTok-এর নিজস্ব login/authorization পেজেই তা সম্পন্ন হবে।</p><form action="/admin/tiktok/save-config" method="POST" style="display:grid;gap:7px;"><input name="tiktokClientKey" value="${tiktokEsc(siteSetting.tiktokClientKey||'')}" placeholder="TikTok Client Key" required style="padding:8px;border:1px solid #ccc;border-radius:6px;display:none;"><input type="password" name="tiktokClientSecret" placeholder="TikTok Client Secret (নতুন হলে দিন)" style="padding:8px;border:1px solid #ccc;border-radius:6px;display:none;"><small style="color:#777;display:none;">Client Secret আগে Save করা থাকলে খালি রাখলেও আগেরটি থাকবে।</small><div style="font-size:12px;background:#fff;padding:7px;border-radius:6px;border:1px solid #eee;word-break:break-all;display:none;"><b>Redirect URI:</b> ${tiktokEsc(TIKTOK_REDIRECT_URI)}</div><button class="btn" style="background:#198754;color:#fff;padding:8px 12px;">💾 Save TikTok Connection</button></form></div>`+
 `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;"><a class="btn" href="/auth/tiktok" style="background:#111;color:#fff;text-decoration:none;padding:8px 12px;">🎵 Connect TikTok Account</a>${tiktokConnected?'<form action="/admin/tiktok/disconnect" method="POST" style="display:inline"><button class="btn" style="background:#dc3545;padding:8px 12px">Disconnect TikTok</button></form>':''}</div>`+
 `<div style="background:#fff;padding:14px;border:1px solid #eee;border-radius:12px;margin-top:14px;"><h4 style="margin-top:0">🚀 Publish to TikTok</h4><form action="/admin/tiktok/publish" method="POST" enctype="multipart/form-data" style="display:grid;gap:8px;"><label>Media Type</label><select name="mediaType" required><option value="video">🎬 Video</option><option value="photo">🖼️ Photo</option></select><label>Caption / Title</label><textarea name="caption" maxlength="2200" placeholder="Caption / hashtags লিখুন..." style="min-height:80px"></textarea><label>Photo Title (photo post হলে)</label><input name="title" maxlength="90" placeholder="Photo title"><label>Privacy</label><select name="privacyLevel"><option value="PUBLIC_TO_EVERYONE">Public</option><option value="MUTUAL_FOLLOW_FRIENDS">Friends</option><option value="FOLLOWER_OF_CREATOR">Followers</option><option value="SELF_ONLY">Only me</option></select><label>Product (ঐচ্ছিক)</label><select name="productId"><option value="">No product</option>${tiktokProductOptions}</select><small style="color:#777">Product নির্বাচন করলে caption-এ আপনার website-এর product URL যুক্ত হবে।</small><label>Video / Photo File</label><input type="file" name="mediaFile" accept="image/*,video/*" required><button class="btn" style="background:#111;color:#fff;padding:9px 14px">🚀 Publish Directly to TikTok</button></form></div>`+
 `<div style="margin-top:12px;background:#f8f9fa;border:1px solid #ddd;border-radius:8px;padding:10px;font-size:12px;color:#555"><b>Order Now:</b> TikTok-এর সাধারণ Content Posting API দিয়ে Facebook-এর মতো custom “Order Now” button/CTA সরাসরি পোস্টের মধ্যে বসানোর নিশ্চয়তা নেই। Product URL caption-এ দেওয়া হবে। Native TikTok Shop product button চাইলে আলাদা TikTok Shop commerce integration ও approval লাগবে।</div></div></details>`;
@@ -2863,9 +2939,9 @@ app.get('/manifest.json', (req, res) => {
   const label = labels[section] || 'Staff Work';
   res.set('Cache-Control','no-store, private, max-age=0');
   res.type('application/manifest+json').send(JSON.stringify({
-    name: isStaffUser ? ('Online Shop — ' + label) : 'Online Shop',
-    short_name: isStaffUser ? label : 'Online Shop',
-    start_url: '/',
+    name: isStaffUser ? ('Online Shop — ' + label) : 'Online Shop Staff',
+    short_name: isStaffUser ? label : 'Shop Staff',
+    start_url: '/staff-login',
     scope: '/',
     display: 'standalone',
     background_color: '#f4f4f4',
@@ -2880,7 +2956,7 @@ app.get('/manifest.json', (req, res) => {
 
 app.get('/sw.js', (req, res) => {
   res.set('Cache-Control','no-store, no-cache, must-revalidate, max-age=0');
-  res.type('application/javascript').send(`const CACHE_NAME='online-shop-v37-browser-home-staff-pwa-v1';
+  res.type('application/javascript').send(`const CACHE_NAME='online-shop-v38-separated-staff-session-v1';
 self.addEventListener('install',event=>{self.skipWaiting();});
 self.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});
 self.addEventListener('fetch',event=>{
