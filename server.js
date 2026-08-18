@@ -478,11 +478,13 @@ req.user = null;
 next();
 });
 
-// ================= Employee Restricted Navigation =================
-// Employees are operational accounts, not customer accounts. Once an employee
-// is logged in, browser/PWA navigation is locked to the assigned Admin work area.
-// Customer-facing pages such as /, /product/*, /cart, /dashboard, /my-orders,
-// /wishlist and /search are intentionally NOT available to employees.
+// ================= V72 Employee / Browser / Installed-PWA Navigation =================
+// IMPORTANT: Chrome and an installed PWA on the SAME origin share cookies/session.
+// Therefore the server must NOT assume that every request made by an employee
+// account came from the installed staff app. Normal Chrome browsing must remain
+// a normal customer-facing shop experience. The installed PWA is identified on
+// the client by display-mode: standalone and is then locked to the assigned
+// employee section.
 function employeeFirstSection(user) {
   const allowed = Array.isArray(user && user.staffAssignedSections) ? user.staffAssignedSections : [];
   return allowed[0] || 'addProduct';
@@ -506,26 +508,31 @@ function employeeAllowedNavigationPath(path) {
     path === '/logout' ||
     path === '/manifest.json' ||
     path === '/staff-manifest.webmanifest' ||
+    path === '/api/staff-app-context' ||
     path === '/sw.js' ||
     path === '/pwa-icon-192.png' ||
     path === '/pwa-icon-512.png';
 }
+// Do not redirect an employee's normal Chrome browser session. This is the key
+// fix: the same site URL opened in Chrome must remain the shop Home page even
+// when the employee account cookie exists in that Chrome profile.
 app.use((req, res, next) => {
   if (!req.user || !isEmployee(req.user)) return next();
   if (!Array.isArray(req.user.staffAssignedSections) || !req.user.staffAssignedSections.length) {
-    return res.status(403).send('<div style="font-family:Arial;padding:30px;max-width:700px;margin:auto"><h2>Employee Access Not Assigned</h2><p>আপনার account-এ এখনো কোনো কাজের section দেওয়া হয়নি। Admin-এর কাছে section assign করতে বলুন।</p></div>');
-  }
-  // Already-logged-in employee visiting Login must return to their assigned work area.
-  if (req.path === '/login') {
-    return res.redirect('/admin-dashboard?staff=1&section=' + encodeURIComponent(employeeFirstSection(req.user)));
-  }
-  // Block customer-facing HTML pages and every other direct browser navigation.
-  // POST/API calls used by the assigned Admin section are still handled by their
-  // existing requireAdminSection() guards below.
-  if (req.method === 'GET' && req.headers.accept && req.headers.accept.includes('text/html') && !employeeAllowedNavigationPath(req.path)) {
-    return res.redirect('/admin-dashboard?staff=1&section=' + encodeURIComponent(employeeFirstSection(req.user)));
+    if (req.path === '/api/staff-app-context') return res.status(403).json({error:'Employee Access Not Assigned'});
+    return next();
   }
   next();
+});
+// The installed PWA asks this endpoint for the employee's assigned section.
+// The browser Home page never redirects because the standalone check happens
+// in the client, not on the normal Chrome request.
+app.get('/api/staff-app-context', (req,res)=>{
+  if (!req.user || !isEmployee(req.user)) return res.json({employee:false});
+  const allowed = Array.isArray(req.user.staffAssignedSections) ? req.user.staffAssignedSections : [];
+  if (!allowed.length) return res.status(403).json({employee:true, assigned:false});
+  res.set('Cache-Control','no-store, private, max-age=0');
+  res.json({employee:true, assigned:true, section:employeeFirstSection(req.user), allowedSections:allowed});
 });
 // Categories list for auto-selection in admin & frontend
 const ALL_CATEGORIES = [
@@ -623,6 +630,33 @@ const globalHeaderHTML = ` <link rel="manifest" href="/manifest.json"><meta name
   },true);
   window.addEventListener('beforeunload',saveScroll);
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',restoreScroll); else restoreScroll();
+})();
+</script>
+<script>
+(function(){
+  // Only the installed app window is a Staff App. A normal Chrome tab is always
+  // treated as the public/customer website, even if the same account is logged in.
+  const standalone = !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  if(!standalone) return;
+  fetch('/api/staff-app-context',{cache:'no-store',credentials:'same-origin'})
+    .then(r=>r.ok?r.json():null)
+    .then(d=>{
+      if(!d || !d.employee || !d.assigned) return;
+      const section=encodeURIComponent(d.section || 'addProduct');
+      const allowedAdmin = location.pathname === '/admin-dashboard' || location.pathname.startsWith('/admin/');
+      if(!allowedAdmin){
+        location.replace('/admin-dashboard?staff=1&section='+section);
+        return;
+      }
+      // If the app is on an Admin section that is not assigned to this employee,
+      // force it back to the employee's first assigned section.
+      const qs=new URLSearchParams(location.search);
+      const current=qs.get('section');
+      if(location.pathname === '/admin-dashboard' && current && Array.isArray(d.allowedSections) && !d.allowedSections.includes(current)){
+        location.replace('/admin-dashboard?staff=1&section='+section);
+      }
+    })
+    .catch(()=>{});
 })();
 </script> <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>`;
 const getNavbarHTML = (user) => ` <header> <a href="/" class="logo">🛒Online Shop</a> <form action="/search" method="GET" class="search-bar"> <input type="text" name="q" placeholder="Search in Online Shop..." required> <button type="submit">🔍</button> </form> </header> <div class="categories-nav"> <a href="/">🔥All</a> <a href="/category/Fashion">👗ফ্যাশন</a> <a href="/category/Supershop">🛒সুপার শপ</a> <a href="/category/Pharmacy">💊ফার্মেসি</a> <a href="/category/Food">🍲খাদ্যপণ্য</a> <a href="/category/Sports">⚽স্পোর্ট স</a> <a href="/category/Books">📚বই</a> <a href="/category/Stationery">✏️স্টেশনারি</a> <a href="/category/HomeDecor">🛋️হোম ডেকোর ও ফার্নিচার</a> <a href="/category/BeautyCare">💄বিউটি পার্লার কেয়ার</a> <a href="/category/Electric">⚡ইলেকট্রিক</a> </div> <div class="bottom-nav"> <a href="/"><span>🏠</span>Home</a> <a href="/wishlist"><span>❤️</span>Wishlist</a> <a href="/cart"><span>🛒</span>Cart</a> <a href="/my-orders"><span>📦</span>Orders</a> ${user ? `<a href="/notifications" style="position:relative;"><span>🔔</span>Alerts <b id="notificationBadge" style="display:none;position:absolute;top:-3px;right:8px;background:#dc3545;color:#fff;border-radius:20px;padding:1px 5px;font-size:9px;">0</b></a><a href="/request-inbox" style="position:relative;"><span>📥</span>Inbox <b id="requestInboxBadge" style="display:none;position:absolute;top:-3px;right:8px;background:#dc3545;color:#fff;border-radius:20px;padding:1px 5px;font-size:9px;">0</b></a><a href="/dashboard"><span>👤</span>Account</a>` : `<a href="/login"><span>🔑</span>Login</a>`} ${user && ((isMainAdmin(user)) || (user.role === 'subadmin' && subAdminIsActive(user))) ? `<a href="/admin-dashboard"><span>⚙️</span>${isMainAdmin(user) ? 'Admin' : 'Seller Admin'}</a>` : ''} </div> ${user ? `<script>(async()=>{try{const r=await fetch('/api/request-chat/unread-count');const d=await r.json();const b=document.getElementById('requestInboxBadge');if(b&&d.count>0){b.textContent=d.count>99?'99+':d.count;b.style.display='inline-block';};const nr=await fetch('/api/notifications/unread-count');const nd=await nr.json();const nb=document.getElementById('notificationBadge');if(nb&&nd.count>0){nb.textContent=nd.count>99?'99+':nd.count;nb.style.display='inline-block';}}catch(e){}})();</script>` : ''} ${user && user.role !== 'admin' ? `
@@ -1522,9 +1556,11 @@ if (!user || !passwordOk) {
 if (user.role === 'staff' && !isEmployee(user)) {
   return res.send(`<script>alert('এই Employee account বর্তমানে Active নয়। Main Admin/Sub Admin-এর কাছে account status যাচাই করুন।'); window.location.href='/login';</script>`);
 }
-// Employee always enters the restricted Admin Dashboard; normal users keep their requested redirect.
+// Keep the login redirect normal. If this login was completed inside the
+// installed Staff PWA, its standalone client lock will immediately open the
+// assigned Admin section. In ordinary Chrome, the user stays on the shop site.
 res.cookie('userSession', JSON.stringify({ email: user.email, role: user.role }));
-const safeRedirect = isEmployee(user) ? ('/admin-dashboard?staff=1&section=' + encodeURIComponent(employeeFirstSection(user))) : ((typeof redirect === 'string' && redirect.startsWith('/')) ? redirect : '/');
+const safeRedirect = (typeof redirect === 'string' && redirect.startsWith('/')) ? redirect : '/';
 res.redirect(safeRedirect);
 } catch (err) {
 next(err);
@@ -2829,7 +2865,7 @@ app.get('/manifest.json', (req, res) => {
   res.type('application/manifest+json').send(JSON.stringify({
     name: isStaffUser ? ('Online Shop — ' + label) : 'Online Shop',
     short_name: isStaffUser ? label : 'Online Shop',
-    start_url: isStaffUser ? ('/admin-dashboard?staff=1&section=' + encodeURIComponent(section)) : '/',
+    start_url: '/',
     scope: '/',
     display: 'standalone',
     background_color: '#f4f4f4',
@@ -2844,7 +2880,7 @@ app.get('/manifest.json', (req, res) => {
 
 app.get('/sw.js', (req, res) => {
   res.set('Cache-Control','no-store, no-cache, must-revalidate, max-age=0');
-  res.type('application/javascript').send(`const CACHE_NAME='online-shop-v36-staff-lock-v1';
+  res.type('application/javascript').send(`const CACHE_NAME='online-shop-v37-browser-home-staff-pwa-v1';
 self.addEventListener('install',event=>{self.skipWaiting();});
 self.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});
 self.addEventListener('fetch',event=>{
