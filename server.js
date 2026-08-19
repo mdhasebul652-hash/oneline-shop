@@ -970,6 +970,49 @@ app.get('/auth/tiktok/callback', async (req, res) => {
     }
 });
 
+// ================= Seller Store / Visit Store =================
+app.get('/store/:id', async (req, res, next) => {
+try {
+  const storeId = String(req.params.id || '');
+  let owner = null, products = [], storeName = 'Main Admin Store', storeLogo = '';
+  if (storeId === 'main-admin' || storeId === 'admin' || !storeId) {
+    owner = await User.findOne({role:'admin'}).select('name email role').lean();
+    const mainAdminId = owner ? String(owner._id) : '';
+    products = mainAdminId
+      ? await Product.find({$or:[{ownerId:mainAdminId},{ownerId:''},{ownerId:null}]}).sort({_id:-1}).lean()
+      : await Product.find({$or:[{ownerId:''},{ownerId:null}]}).sort({_id:-1}).lean();
+  } else {
+    if (!mongoose.Types.ObjectId.isValid(storeId)) return res.status(404).send('Store not found');
+    owner = await User.findById(storeId).select('name email role subAdminShopName subAdminShopLogo subAdminStatus').lean();
+    if (!owner || !['admin','subadmin'].includes(owner.role)) return res.status(404).send('Store not found');
+    products = await Product.find({ownerId:String(owner._id)}).sort({_id:-1}).lean();
+    storeName = owner.role === 'subadmin' ? (owner.subAdminShopName || owner.name || owner.email || 'Seller Store') : 'Main Admin Store';
+    storeLogo = owner.subAdminShopLogo || '';
+  }
+  const logoHTML = storeLogo
+    ? `<img src="${mediaUrl(storeLogo)}" alt="Store Logo" style="width:72px;height:72px;object-fit:cover;border-radius:50%;border:2px solid #f85606;background:#fff;">`
+    : `<div style="width:72px;height:72px;border-radius:50%;border:2px solid #f85606;background:#fff7f2;display:flex;align-items:center;justify-content:center;font-size:34px;">🏪</div>`;
+  const cards = products.map(p => `<div class="product-card" onclick="window.location.href='/product/${p._id}'" style="cursor:pointer;">
+    <img src="${mediaUrl(p.mainImage)}" alt="${v46Esc(p.name||'Product')}" onclick="event.stopPropagation();openImageModal(this.src);">
+    <h4 style="font-size:13px;height:38px;">${v46Esc(p.name||'Product')}</h4>
+    <div class="price" style="font-size:15px;">৳${Number(p.price)||0}</div>
+    <div style="font-size:11px;color:#666;">Stock: ${Number(p.stock)||0}</div>
+  </div>`).join('');
+  res.send(`<!DOCTYPE html><html><head><title>${v46Esc(storeName)}</title>${globalHeaderHTML}</head><body>${getNavbarHTML(req.user)}
+  <div class="container">
+    <div style="background:#fff;padding:18px;border-radius:10px;border:1px solid #eee;margin-bottom:15px;">
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">${logoHTML}<div style="flex:1;min-width:220px;">
+        <h2 style="margin:0 0 5px 0;">${v46Esc(storeName)}</h2>
+        <div style="font-size:12px;color:#666;">${owner && owner.role==='subadmin' ? 'Seller Shop' : 'Main Admin Store'}</div>
+      </div></div>
+    </div>
+    <div style="background:#fff;padding:14px;border-radius:8px;"><h3 style="margin:0 0 12px;">🛍️ More from Store</h3>
+      <div class="product-grid">${cards || '<p style="color:#777;">এই দোকানে এখন কোনো Product নেই।</p>'}</div>
+    </div>
+  </div></body></html>`);
+} catch(err) { next(err); }
+});
+
 // Product Details Page
 // ================= Persistent Quick Quantity Control =================
 // Keeps the customer's selected quantity in a browser cookie so the +/− control
@@ -1024,24 +1067,19 @@ app.get('/api/product-qty/:id/:action', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-app.get('/store/:id', async (req, res, next) => {
-try {
-  const storeId = String(req.params.id || '').trim();
-  if (!mongoose.Types.ObjectId.isValid(storeId)) return res.status(404).send('Store not found');
-  const seller = await User.findById(storeId).select('name email role subAdminShopName phone subAdminBusinessInfo').lean();
-  if (!seller) return res.status(404).send('Store not found');
-  const ownerFilter = { ownerId: storeId };
-  const products = await Product.find(ownerFilter).sort({ createdAt: -1 }).lean();
-  const shopName = seller.subAdminShopName || seller.name || seller.email || 'Online Shop';
-  const cards = products.map(p => `<div class="product-card" style="cursor:pointer;" onclick="window.location.href='/product/${p._id}'"><img src="${mediaUrl(p.mainImage)}" alt="${v46Esc(p.name || '')}" style="width:100%;height:180px;object-fit:cover;border-radius:6px;"><h4 style="font-size:14px;margin:8px 0 4px;">${v46Esc(p.name || '')}</h4><div class="price">৳${Number(p.price || 0)}</div><div style="font-size:11px;color:#777;">Stock: ${Number(p.stock || 0)}</div></div>`).join('');
-  res.send(`<!DOCTYPE html><html><head><title>${v46Esc(shopName)} - Store</title>${globalHeaderHTML}</head><body>${getNavbarHTML(req.user)}<div class="container" style="background:#fff;padding:15px;border-radius:8px;"><div style="display:flex;align-items:center;gap:14px;background:#fff7f2;border:1px solid #ffd7c2;border-radius:10px;padding:15px;margin-bottom:18px;"><div style="width:64px;height:64px;border-radius:50%;background:#f85606;color:#fff;display:flex;align-items:center;justify-content:center;font-size:30px;">🏪</div><div style="flex:1;"><div style="font-size:11px;color:#777;">Seller Store</div><h2 style="margin:2px 0 4px;font-size:20px;">${v46Esc(shopName)}</h2><div style="font-size:12px;color:#666;">${products.length}টি Product</div></div></div><h3 style="margin:10px 0 14px;">More from Store</h3><div class="product-grid">${cards || '<p style="color:#777;">এই দোকানে এখনো কোনো Product নেই।</p>'}</div></div></body></html>`);
-} catch(e) { next(e); }
-});
-
 app.get('/product/:id', async (req, res, next) => {
 try {
 let product = await Product.findById(req.params.id);
 if (!product) return res.send('Product not found');
+let seller = null;
+let sellerStoreId = 'main-admin';
+if (product.ownerId && mongoose.Types.ObjectId.isValid(String(product.ownerId))) {
+  seller = await User.findById(product.ownerId).select('name email role subAdminShopName subAdminShopLogo subAdminStatus').lean();
+  if (seller) sellerStoreId = String(seller._id);
+}
+if (!seller) seller = await User.findOne({role:'admin'}).select('name email role subAdminShopName subAdminShopLogo').lean();
+let sellerStoreName = seller && seller.role === 'subadmin' ? (seller.subAdminShopName || seller.name || seller.email || 'Seller Shop') : 'Main Admin Store';
+let sellerLogo = seller && seller.subAdminShopLogo ? seller.subAdminShopLogo : '';
 let chats = await Chat.find({ productId: product._id });
 let reviews = await Review.find({ productId: product._id }).sort({ _id: -1 });
 let relatedProducts = await Product.find({ category: product.category, _id: { $ne:
@@ -1057,16 +1095,12 @@ const savedProductQty = Number(req.cookies[productQtyCookieName]) || 1;
 let currentQtyFromQuery = req.query.qty !== undefined ? (Number(req.query.qty) || 1) : savedProductQty;
 let currentQty = Math.min(allowedMax, Math.max(1, Math.floor(currentQtyFromQuery)));
 res.cookie(productQtyCookieName, String(currentQty), {httpOnly:false, sameSite:'lax', maxAge:30*24*60*60*1000});
-let seller = null;
-if (product.ownerId) { seller = await User.findById(product.ownerId).select('name email role subAdminShopName phone').lean(); }
-if (!seller) { seller = await User.findOne({ role:'admin' }).select('name email role subAdminShopName phone').lean(); }
-const sellerStoreId = seller && seller._id ? String(seller._id) : '';
-const sellerStoreName = (seller && (seller.subAdminShopName || seller.name || seller.email)) || 'Online Shop';
 let selectedGalleryIndex = Math.max(0, allImages.findIndex(x => String(x) === requestedPreviewImage));
 if (selectedGalleryIndex < 0) selectedGalleryIndex = 0;
 let galleryHTML = galleryData.map((item, idx) => {
-  const fallbackHref = `/product/${product._id}?previewImage=${encodeURIComponent(item.raw)}&qty=${currentQty}`;
-  return ` <a href="${fallbackHref}" class="thumb-link" data-gallery-index="${idx}" aria-label="Product image ${idx+1}" aria-current="${idx===selectedGalleryIndex?'true':'false'}" style="padding:0;margin:0;border:0;background:transparent;cursor:pointer;display:block;flex:0 0 auto;pointer-events:auto;touch-action:manipulation;-webkit-tap-highlight-color:transparent;text-decoration:none;"><img src="${item.src}" class="thumb-img" alt="Product image ${idx+1}" style="width:60px;height:60px;object-fit:cover;border-radius:4px;border:${idx === selectedGalleryIndex ? '2px solid #f85606' : '1px solid #ccc'};cursor:pointer;display:block;pointer-events:none;user-select:none;" draggable="false" onerror="this.style.opacity='0.35'"></a> `;
+  return ` <button type="button" class="thumb-btn" data-gallery-index="${idx}" aria-label="Product image ${idx+1}" aria-current="${idx===selectedGalleryIndex?'true':'false'}" onclick="return window.__osSelectGallery(${idx},event);" style="padding:0;margin:0;border:0;background:transparent;cursor:pointer;display:block;flex:0 0 auto;touch-action:manipulation;-webkit-tap-highlight-color:transparent;line-height:0;pointer-events:auto;">
+    <img src="${item.src}" class="thumb-img" alt="Product image ${idx+1}" style="width:60px;height:60px;object-fit:cover;border-radius:4px;border:${idx === selectedGalleryIndex ? '2px solid #f85606' : '1px solid #ccc'};cursor:pointer;display:block;pointer-events:none;user-select:none;" draggable="false" onerror="this.style.opacity='0.35'">
+  </button> `;
 }).join('');
 let chatsHTML = chats.map(c => {
   const img = mediaUrl(c.productImage);
@@ -1081,131 +1115,110 @@ let chatsHTML = chats.map(c => {
 }).join('');
 let reviewsHTML = reviews.map(r => ` <div style="border-bottom:1px solid #eee; padding:8px 0; font-size:13px;"> <p style="margin:0 0 2px 0;"><b>${r.userEmail}</b> - <span style="color:#ff9800; font-weight:bold;">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span></p> <p style="margin:0; color:#444;">${r.comment}</p> </div> `).join('');
 let relatedHTML = relatedProducts.map(p => ` <div class="product-card" onclick="window.location.href='/product/${p._id}'"> <img src="${mediaUrl(p.mainImage)}" alt="${p.name}" onclick="event.stopPropagation(); openImageModal('${mediaUrl(p.mainImage)}');"> <h4 style="font-size:13px; height:32px;">${p.name}</h4> <div class="price" style="font-size:15px;">৳${p.price}</div> </div> `).join(''); 
-res.send(` <!DOCTYPE html> <html> <head><title>${product.name}</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="background:white; padding:15px; border-radius:6px;"> <div style="display:flex; gap:20px; flex-wrap:wrap;"> <div style="width:100%; max-width:320px; margin:0 auto;"> <img id="mainProductImg" src="${mediaUrl(requestedPreviewImage)}" style="width:100%; height:300px; object-fit:cover; border-radius:6px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(this.src)"><br> <div id="productGallery" style="display:flex; gap:8px; margin-top:10px; overflow-x:auto; padding:2px;">${galleryHTML}</div> </div> <div style="flex:1; min-width: 260px;"> <h2 style="font-size:18px; margin-top:0;">${product.name}</h2> <p style="font-size:13px; color:#666;"><b>Category:</b> ${product.category}</p> <div class="price">৳${product.price}</div> ${isCustomerLike(req.user) ? `<form action="/wishlist/toggle/${product._id}" method="POST" style="margin:8px 0;"><button type="submit" class="btn" style="background:#e91e63;color:#fff;padding:7px 12px;">❤️ ${Array.isArray(req.user.wishlist) && req.user.wishlist.map(String).includes(String(product._id)) ? 'Remove from Wishlist' : 'Add to Wishlist'}</button></form>` : ''} <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock}</p> <p style="font-size:13px; color:#d9534f;"><b>Maximum Order Limit:</b> ${product.maxOrderLimit || 5}</p> <p style="font-size:13px; color:#007bff;"><b>Delivery Charge:</b> ৳${product.deliveryCharge || 150}</p> <p style="font-size:14px; color:#440;">${product.description}</p> <br> <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;"> <span style="font-weight:600; font-size:13px;">Quantity:</span> <button type="button" id="qtyMinusBtn" aria-label="Decrease quantity" onclick="decrementQty(event);" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:pointer; position:relative; z-index:9999; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none;">−</button> <input id="qtyInput" type="number" min="1" max="${allowedMax}" step="1" value="${currentQty}" aria-label="Quantity" style="width:55px; padding:6px 4px; font-size:16px; font-weight:bold; text-align:center; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"> <button type="button" id="qtyPlusBtn" aria-label="Increase quantity" onclick="incrementQty(event);" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:pointer; position:relative; z-index:9999; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none;">+</button> </div> <div style="display: flex; gap: 10px; flex-wrap:wrap;"> <a id="buyNowBtn" href="/buy-now/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn btn-buy" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center;">Buy Now</a> <a id="addToCartBtn" href="/api/add-to-cart/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#28a745;">🛒Add to Cart</a> ${getProductWhatsAppUrl(product) ? `<a href="${getProductWhatsAppUrl(product)}" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#25D366; color:#fff; text-decoration:none;">💬 WhatsApp-এ কথা বলুন</a>` : ''} </div> </div> </div> <script>
-const galleryImages = ${JSON.stringify(galleryData)};
-let currentQty = ${currentQty};
-const productMaxLimit = Math.max(0, Number(${Number(product.maxOrderLimit || 5)}) || 5);
-const productStock = Math.max(0, Number(${Number(product.stock ?? 0)}) || 0);
-const allowedMax = Math.min(productMaxLimit || 5, productStock);
-let selectedImage = ${JSON.stringify(requestedPreviewImage)};
-function resolveGalleryUrl(value) {
-  const v = String(value || '').trim();
-  if (!v) return '';
-  if (/^(https?:)?\/\//i.test(v) || v.startsWith('data:') || v.startsWith('blob:')) return v;
-  return '/uploads/' + v.replace(/\\/g,'/').replace(/^\/+/, '').replace(/^uploads\//i, '');
-}
-function updateOrderLinks() {
-  const buyBtn = document.getElementById('buyNowBtn');
-  const cartBtn = document.getElementById('addToCartBtn');
+res.send(` <!DOCTYPE html> <html> <head><title>${product.name}</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="background:white; padding:15px; border-radius:6px;"> <div style="display:flex; gap:20px; flex-wrap:wrap;"> <div style="width:100%; max-width:320px; margin:0 auto;"> <img id="mainProductImg" src="${mediaUrl(requestedPreviewImage)}" style="width:100%; height:300px; object-fit:cover; border-radius:6px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(this.src)"><br> <div id="productGallery" style="display:flex; gap:8px; margin-top:10px; overflow-x:auto; padding:2px;">${galleryHTML}</div> </div> <div style="flex:1; min-width: 260px;"> <h2 style="font-size:18px; margin-top:0;">${product.name}</h2> <p style="font-size:13px; color:#666;"><b>Category:</b> ${product.category}</p> <div class="price">৳${product.price}</div> ${isCustomerLike(req.user) ? `<form action="/wishlist/toggle/${product._id}" method="POST" style="margin:8px 0;"><button type="submit" class="btn" style="background:#e91e63;color:#fff;padding:7px 12px;">❤️ ${Array.isArray(req.user.wishlist) && req.user.wishlist.map(String).includes(String(product._id)) ? 'Remove from Wishlist' : 'Add to Wishlist'}</button></form>` : ''} <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock}</p> <p style="font-size:13px; color:#d9534f;"><b>Maximum Order Limit:</b> ${product.maxOrderLimit || 5}</p> <p style="font-size:13px; color:#007bff;"><b>Delivery Charge:</b> ৳${product.deliveryCharge || 150}</p> <p style="font-size:14px; color:#440;">${product.description}</p> <br> <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
+<span style="font-weight:600; font-size:13px;">Quantity:</span>
+<button type="button" id="qtyMinusBtn" aria-label="Decrease quantity" onclick="return window.__osQtyChange(-1,event);" style="width:42px;height:42px;padding:0;font-size:22px;font-weight:bold;background:#ddd;color:#000;border:1px solid #ccc;border-radius:6px;cursor:pointer;position:relative;z-index:10001;pointer-events:auto;touch-action:manipulation;user-select:none;-webkit-user-select:none;">−</button>
+<span id="qtyValue" aria-live="polite" style="display:inline-flex;align-items:center;justify-content:center;min-width:55px;height:42px;padding:0 10px;font-size:17px;font-weight:700;border:1px solid #ccc;border-radius:6px;background:#fff;">${currentQty}</span>
+<button type="button" id="qtyPlusBtn" aria-label="Increase quantity" onclick="return window.__osQtyChange(1,event);" style="width:42px;height:42px;padding:0;font-size:22px;font-weight:bold;background:#ddd;color:#000;border:1px solid #ccc;border-radius:6px;cursor:pointer;position:relative;z-index:10001;pointer-events:auto;touch-action:manipulation;user-select:none;-webkit-user-select:none;">+</button>
+<span id="qtyLimitText" style="font-size:11px;color:#777;">Max: ${allowedMax}</span>
+</div> <div style="display: flex; gap: 10px; flex-wrap:wrap;"> <a id="buyNowBtn" href="/buy-now/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn btn-buy" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center;">Buy Now</a> <a id="addToCartBtn" href="/api/add-to-cart/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#28a745;">🛒Add to Cart</a> ${getProductWhatsAppUrl(product) ? `<a href="${getProductWhatsAppUrl(product)}" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#25D366; color:#fff; text-decoration:none;">💬 WhatsApp-এ কথা বলুন</a>` : ''} </div> </div> </div> <script>
+(function(){
+  const galleryImages = ${JSON.stringify(galleryData)};
   const productId = ${JSON.stringify(String(product._id))};
-  const encodedImage = encodeURIComponent(selectedImage || '');
-  if (buyBtn) buyBtn.href = '/buy-now/' + productId + '?qty=' + Math.max(1,currentQty) + '&selectedImage=' + encodedImage;
-  if (cartBtn) cartBtn.href = '/api/add-to-cart/' + productId + '?qty=' + Math.max(1,currentQty) + '&selectedImage=' + encodedImage;
-}
-function refreshQtyUI() {
-  if (currentQty < 1) currentQty = 1;
-  if (allowedMax > 0 && currentQty > allowedMax) currentQty = allowedMax;
-  const display = document.getElementById('qtyDisplay');
-  const input = document.getElementById('qtyInput');
-  const minus = document.getElementById('qtyMinusBtn');
-  const plus = document.getElementById('qtyPlusBtn');
-  if (display) display.textContent = String(currentQty);
-  if (input) { input.value = String(currentQty); input.max = String(Math.max(1, allowedMax || 1)); }
-  if (minus) { minus.disabled = currentQty <= 1; minus.style.opacity = currentQty <= 1 ? '0.5' : '1'; minus.style.cursor = currentQty <= 1 ? 'not-allowed' : 'pointer'; }
-  if (plus) { plus.disabled = allowedMax <= 1 || currentQty >= allowedMax; plus.style.opacity = plus.disabled ? '0.5' : '1'; plus.style.cursor = plus.disabled ? 'not-allowed' : 'pointer'; }
-  updateOrderLinks();
-}
-function saveProductQtyCookie() {
-  try {
-    document.cookie = productQtyCookieName + '=' + encodeURIComponent(String(currentQty)) + '; path=/; max-age=2592000; samesite=lax';
-  } catch (_) {}
-}
-function incrementQty(ev) {
-  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-  const max = Math.max(1, Number(allowedMax) || 1);
-  if (currentQty < max) currentQty += 1;
-  refreshQtyUI();
-  saveProductQtyCookie();
-  return false;
-}
-function decrementQty(ev) {
-  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-  if (currentQty > 1) currentQty -= 1;
-  refreshQtyUI();
-  saveProductQtyCookie();
-  return false;
-}
-function adjustProductQty(delta, ev) {
-  return Number(delta) > 0 ? incrementQty(ev) : decrementQty(ev);
-}
-function setProductQtyFromInput(value) {
-  let q = Math.floor(Number(value));
-  const max = Math.max(1, Number(allowedMax) || 1);
-  if (!Number.isFinite(q)) q = 1;
-  q = Math.max(1, Math.min(q, max));
-  currentQty = q;
-  refreshQtyUI();
-  saveProductQtyCookie();
-  return false;
-}
-window.incrementQty = incrementQty;
-window.decrementQty = decrementQty;
-window.adjustProductQty = adjustProductQty;
-window.setProductQtyFromInput = setProductQtyFromInput;
-document.addEventListener('DOMContentLoaded', function(){
-  const input = document.getElementById('qtyInput');
-  if (input) {
-    input.addEventListener('change', function(){ setProductQtyFromInput(this.value); });
+  const maxAllowed = ${Number(allowedMax)};
+  let currentQty = ${Number(currentQty)};
+  let selectedImage = ${JSON.stringify(requestedPreviewImage)};
+
+  function clampQty(q){
+    q = Math.floor(Number(q));
+    if(!Number.isFinite(q) || q < 1) q = 1;
+    return maxAllowed > 0 ? Math.min(q, maxAllowed) : 1;
   }
-  refreshQtyUI();
-});
-function setMainProductImage(index, element) {
-  const item = galleryImages[Number(index)];
-  const main = document.getElementById('mainProductImg');
-  if (!item || !main) return false;
-  const src = String(item.src || resolveGalleryUrl(item.raw || '')).trim();
-  if (!src) return false;
-  selectedImage = String(item.raw || item.src || '');
-  main.src = src;
-  main.setAttribute('data-selected-image', selectedImage);
-  document.querySelectorAll('.thumb-img').forEach(t => { t.style.border = '1px solid #ccc'; });
-  document.querySelectorAll('.thumb-link').forEach(t => t.setAttribute('aria-current','false'));
-  const thumb = element || document.querySelector('.thumb-link[data-gallery-index="' + Number(index) + '"]');
-  if (thumb) {
-    const image = thumb.classList && thumb.classList.contains('thumb-img') ? thumb : thumb.querySelector('.thumb-img');
-    if (image) image.style.border = '2px solid #f85606';
-    if (thumb.classList && thumb.classList.contains('thumb-link')) thumb.setAttribute('aria-current','true');
-    else if (thumb.closest('.thumb-link')) thumb.closest('.thumb-link').setAttribute('aria-current','true');
+
+  function updateOrderLinks(){
+    const q = clampQty(currentQty);
+    currentQty = q;
+    const img = encodeURIComponent(selectedImage || '');
+    const buy = document.getElementById('buyNowBtn');
+    const cart = document.getElementById('addToCartBtn');
+    if(buy) buy.href = '/buy-now/' + encodeURIComponent(productId) + '?qty=' + q + '&selectedImage=' + img;
+    if(cart) cart.href = '/api/add-to-cart/' + encodeURIComponent(productId) + '?qty=' + q + '&selectedImage=' + img;
   }
-  updateOrderLinks();
-  return false;
-}
-window.incrementQty = incrementQty;
-window.decrementQty = decrementQty;
-window.adjustProductQty = adjustProductQty;
-window.setMainProductImage = setMainProductImage;
-function bindProductControlEvents() {
-  // Quantity buttons use direct inline onclick handlers. This avoids duplicate
-  // or late event-listener binding problems on dynamically rendered pages.
-  const gallery = document.getElementById('productGallery');
-  if (gallery && !gallery.dataset.bound) {
-    gallery.dataset.bound = '1';
-    gallery.addEventListener('click', function(ev){
-      const thumb = ev.target.closest('.thumb-link');
-      if (!thumb || !gallery.contains(thumb)) return;
-      ev.preventDefault(); ev.stopPropagation();
-      setMainProductImage(Number(thumb.dataset.galleryIndex), thumb);
-    }, {passive:false});
+
+  function renderQty(){
+    currentQty = clampQty(currentQty);
+    const value = document.getElementById('qtyValue');
+    const minus = document.getElementById('qtyMinusBtn');
+    const plus = document.getElementById('qtyPlusBtn');
+    if(value) value.textContent = String(currentQty);
+    if(minus){ minus.disabled = currentQty <= 1; minus.style.opacity = currentQty <= 1 ? '0.5' : '1'; }
+    if(plus){ plus.disabled = maxAllowed <= 1 || currentQty >= maxAllowed; plus.style.opacity = (maxAllowed <= 1 || currentQty >= maxAllowed) ? '0.5' : '1'; }
+    updateOrderLinks();
   }
-}
-function initProductControls() {
-  bindProductControlEvents();
-  refreshQtyUI();
-  if (galleryImages.length) setMainProductImage(${selectedGalleryIndex}, document.querySelector('.thumb-link[data-gallery-index="${selectedGalleryIndex}"]'));
-}
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initProductControls);
-else initProductControls();
-</script> <div style="margin-top:18px;background:#fff;border:1px solid #eee;border-radius:10px;padding:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><div style="width:58px;height:58px;border-radius:50%;background:#f85606;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px;">🏪</div><div style="flex:1;min-width:180px;"><div style="font-size:11px;color:#777;">Sold by</div><a href="/store/${encodeURIComponent(String(sellerStoreId))}" style="font-size:16px;font-weight:700;color:#222;text-decoration:none;">${v46Esc(sellerStoreName)}</a><div style="font-size:11px;color:#777;margin-top:2px;">${seller && seller.role==='subadmin' ? 'Seller Shop' : 'Main Admin Store'}</div></div><a href="/store/${encodeURIComponent(String(sellerStoreId))}" class="btn" style="padding:8px 14px;background:#f85606;">🏪 Visit Store</a></div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ratings & Reviews</h3> <form action="/api/add-review" method="POST" style="background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:15px;"> <input type="hidden" name="productId" value="${product._id}"> <label style="font-size:13px; font-weight:600;">Rate this product:</label> <select name="rating" style="padding:5px; margin-bottom:8px; border-radius:4px; border:1px solid #ccc;" required> <option value="5">★★★★★ (5 Stars)</option> <option value="4">★★★★☆ (4 Stars)</option> <option value="3">★★★☆☆ (3 Stars)</option> <option value="2">★★☆☆☆ (2 Stars)</option> <option value="1">★☆☆☆☆ (1 Star)</option> </select><br> <textarea name="comment" placeholder="Write your review here..." style="width:100%; height:50px; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required></textarea> <button type="submit" class="btn" style="padding:6px 12px; font-size:12px; margin-top:5px;">Submit Review</button> </form> <div>${reviewsHTML.length ? reviewsHTML : '<p style="color:#777; font-size:13px;">No reviews yet.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>You May Also Like</h3> <div class="product-grid" style="margin-top:10px;">${relatedHTML.length ? relatedHTML : '<p>No related products.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ask Question About This Product</h3> <form action="/api/chat" method="POST"> <input type="hidden" name="productId" value="${product._id}"> <input type="hidden" name="productName" value="${product.name}"> <input type="hidden" name="productImage" value="${product.mainImage}"> <textarea name="message" placeholder="Ask your question here..." style="width:100%; height:70px; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea><br> <button type="submit" class="btn" style="margin-top:6px; padding:8px 14px;">Send Question</button> </form> <div style="margin-top:20px;"> <h4 style="margin-bottom:10px;">Customer Q&A (পণ্যের বিষয়ে আপনার ও এডমিনের কথোপকথন):</h4> ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions yet.</p>'} </div> </div> </body> </html> `);
+
+  // UI changes immediately. Saving the quantity is fire-and-forget and can never block +/−.
+  function saveQty(){
+    try{
+      fetch('/api/product-qty/' + encodeURIComponent(productId) + '/set?qty=' + encodeURIComponent(currentQty) + '&ajax=1', {
+        method:'GET', credentials:'same-origin', cache:'no-store', keepalive:true,
+        headers:{'Accept':'application/json','X-Requested-With':'XMLHttpRequest'}
+      }).catch(function(){});
+    }catch(_){ }
+  }
+
+  window.__osQtyChange = function(delta, ev){
+    if(ev){ ev.preventDefault(); ev.stopPropagation(); }
+    delta = Number(delta) > 0 ? 1 : -1;
+    const before = currentQty;
+    const next = clampQty(before + delta);
+    if(next === before) return false;
+    currentQty = next;
+    renderQty();
+    saveQty();
+    return false;
+  };
+  window.incrementQty = function(ev){ return window.__osQtyChange(1,ev); };
+  window.decrementQty = function(ev){ return window.__osQtyChange(-1,ev); };
+  window.adjustProductQty = function(delta,ev){ return window.__osQtyChange(delta,ev); };
+
+  function setMainProductImage(index, element){
+    const item = galleryImages[Number(index)];
+    const main = document.getElementById('mainProductImg');
+    if(!item || !main) return false;
+    const src = String(item.src || '').trim();
+    if(!src) return false;
+    selectedImage = String(item.raw || item.src || '');
+    main.src = src;
+    main.setAttribute('data-selected-image', selectedImage);
+    document.querySelectorAll('.thumb-img').forEach(function(t){ t.style.border='1px solid #ccc'; });
+    document.querySelectorAll('.thumb-btn').forEach(function(t){ t.setAttribute('aria-current','false'); });
+    const thumb = element || document.querySelector('.thumb-btn[data-gallery-index="' + Number(index) + '"]');
+    if(thumb){
+      const image = thumb.querySelector('.thumb-img');
+      if(image) image.style.border='2px solid #f85606';
+      thumb.setAttribute('aria-current','true');
+    }
+    updateOrderLinks();
+    return false;
+  }
+  window.__osSelectGallery = function(index, ev){
+    if(ev){ ev.preventDefault(); ev.stopPropagation(); }
+    return setMainProductImage(index, ev && ev.currentTarget ? ev.currentTarget : null);
+  };
+  window.setMainProductImage = setMainProductImage;
+
+  function init(){
+    renderQty();
+    if(galleryImages.length) setMainProductImage(${selectedGalleryIndex}, document.querySelector('.thumb-btn[data-gallery-index="${selectedGalleryIndex}"]'));
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded',init,{once:true});
+  else init();
+})();
+</script> <div style="margin-top:18px;background:#fff;border:1px solid #eee;border-radius:10px;padding:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+${sellerLogo ? `<img src="${mediaUrl(sellerLogo)}" alt="Seller Logo" style="width:58px;height:58px;object-fit:cover;border-radius:50%;border:1px solid #ddd;">` : `<div style="width:58px;height:58px;border-radius:50%;background:#fff7f2;border:1px solid #ffd7c2;display:flex;align-items:center;justify-content:center;font-size:28px;">🏪</div>`}
+<div style="flex:1;min-width:180px;"><div style="font-size:11px;color:#777;">Sold by</div><a href="/store/${encodeURIComponent(String(sellerStoreId))}" style="font-size:16px;font-weight:700;color:#222;text-decoration:none;">${v46Esc(sellerStoreName)}</a><div style="font-size:11px;color:#777;margin-top:2px;">${seller && seller.role==='subadmin' ? 'Seller Shop' : 'Main Admin Store'}</div></div>
+<a href="/store/${encodeURIComponent(String(sellerStoreId))}" class="btn" style="padding:8px 14px;background:#f85606;">🏪 Visit Store</a>
+</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ratings & Reviews</h3> <form action="/api/add-review" method="POST" style="background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:15px;"> <input type="hidden" name="productId" value="${product._id}"> <label style="font-size:13px; font-weight:600;">Rate this product:</label> <select name="rating" style="padding:5px; margin-bottom:8px; border-radius:4px; border:1px solid #ccc;" required> <option value="5">★★★★★ (5 Stars)</option> <option value="4">★★★★☆ (4 Stars)</option> <option value="3">★★★☆☆ (3 Stars)</option> <option value="2">★★☆☆☆ (2 Stars)</option> <option value="1">★☆☆☆☆ (1 Star)</option> </select><br> <textarea name="comment" placeholder="Write your review here..." style="width:100%; height:50px; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required></textarea> <button type="submit" class="btn" style="padding:6px 12px; font-size:12px; margin-top:5px;">Submit Review</button> </form> <div>${reviewsHTML.length ? reviewsHTML : '<p style="color:#777; font-size:13px;">No reviews yet.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>You May Also Like</h3> <div class="product-grid" style="margin-top:10px;">${relatedHTML.length ? relatedHTML : '<p>No related products.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ask Question About This Product</h3> <form action="/api/chat" method="POST"> <input type="hidden" name="productId" value="${product._id}"> <input type="hidden" name="productName" value="${product.name}"> <input type="hidden" name="productImage" value="${product.mainImage}"> <textarea name="message" placeholder="Ask your question here..." style="width:100%; height:70px; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea><br> <button type="submit" class="btn" style="margin-top:6px; padding:8px 14px;">Send Question</button> </form> <div style="margin-top:20px;"> <h4 style="margin-bottom:10px;">Customer Q&A (পণ্যের বিষয়ে আপনার ও এডমিনের কথোপকথন):</h4> ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions yet.</p>'} </div> </div> </body> </html> `);
 } catch (err) {
 next(err);
 }
