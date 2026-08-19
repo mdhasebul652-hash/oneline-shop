@@ -1024,37 +1024,24 @@ app.get('/api/product-qty/:id/:action', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-app.get('/store/:sellerId', async (req, res, next) => {
+app.get('/store/:id', async (req, res, next) => {
 try {
-  const sellerId = String(req.params.sellerId || '').trim();
-  if (!sellerId) return res.status(400).send('Store not found');
-  const seller = await User.findById(sellerId).lean();
+  const storeId = String(req.params.id || '').trim();
+  if (!mongoose.Types.ObjectId.isValid(storeId)) return res.status(404).send('Store not found');
+  const seller = await User.findById(storeId).select('name email role subAdminShopName phone subAdminBusinessInfo').lean();
   if (!seller) return res.status(404).send('Store not found');
-  const products = await Product.find({ ownerId: sellerId }).sort({ _id: -1 }).lean();
-  const shopName = seller.subAdminShopName || seller.name || (seller.role === 'admin' ? 'Main Admin Store' : 'Seller Store');
-  const initial = String(shopName).trim().charAt(0).toUpperCase() || 'S';
-  const productsHTML = products.map(p => `<div class="product-card" onclick="window.location.href='/product/${p._id}'" style="cursor:pointer;">
-    <img src="${mediaUrl(p.mainImage)}" alt="${String(p.name||'').replace(/"/g,'&quot;')}" onclick="event.stopPropagation(); openImageModal('${mediaUrl(p.mainImage)}');">
-    <h4>${p.name || 'Product'}</h4><div class="price">৳${p.price}</div>
-    <div style="font-size:11px;color:#777;">Stock: ${p.stock} | Max: ${p.maxOrderLimit || 5}</div>
-  </div>`).join('');
-  res.send(`<!DOCTYPE html><html><head><title>${shopName} - Online Shop</title>${globalHeaderHTML}</head><body>${getNavbarHTML(req.user)}
-  <div class="container">
-    <div style="background:#fff;border-radius:12px;padding:18px;margin-bottom:15px;box-shadow:0 2px 8px rgba(0,0,0,.06);display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-      <div style="width:68px;height:68px;border-radius:50%;background:#f85606;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800;">${initial}</div>
-      <div style="flex:1;min-width:220px;"><h2 style="margin:0 0 5px 0;font-size:20px;">${shopName}</h2><div style="font-size:12px;color:#777;">🏪 Seller Shop • ${products.length} product${products.length===1?'':'s'}</div>${seller.subAdminBusinessInfo?`<div style="font-size:12px;color:#555;margin-top:5px;">${seller.subAdminBusinessInfo}</div>`:''}</div>
-    </div>
-    <h3 style="margin:10px 0 15px 0;">🛍️ More from Store</h3>
-    <div class="product-grid">${productsHTML || '<div style="background:#fff;padding:30px;text-align:center;border-radius:8px;grid-column:1/-1;color:#777;">এই দোকানে এখনো কোনো Product নেই।</div>'}</div>
-  </div></body></html>`);
-} catch (err) { next(err); }
+  const ownerFilter = { ownerId: storeId };
+  const products = await Product.find(ownerFilter).sort({ createdAt: -1 }).lean();
+  const shopName = seller.subAdminShopName || seller.name || seller.email || 'Online Shop';
+  const cards = products.map(p => `<div class="product-card" style="cursor:pointer;" onclick="window.location.href='/product/${p._id}'"><img src="${mediaUrl(p.mainImage)}" alt="${v46Esc(p.name || '')}" style="width:100%;height:180px;object-fit:cover;border-radius:6px;"><h4 style="font-size:14px;margin:8px 0 4px;">${v46Esc(p.name || '')}</h4><div class="price">৳${Number(p.price || 0)}</div><div style="font-size:11px;color:#777;">Stock: ${Number(p.stock || 0)}</div></div>`).join('');
+  res.send(`<!DOCTYPE html><html><head><title>${v46Esc(shopName)} - Store</title>${globalHeaderHTML}</head><body>${getNavbarHTML(req.user)}<div class="container" style="background:#fff;padding:15px;border-radius:8px;"><div style="display:flex;align-items:center;gap:14px;background:#fff7f2;border:1px solid #ffd7c2;border-radius:10px;padding:15px;margin-bottom:18px;"><div style="width:64px;height:64px;border-radius:50%;background:#f85606;color:#fff;display:flex;align-items:center;justify-content:center;font-size:30px;">🏪</div><div style="flex:1;"><div style="font-size:11px;color:#777;">Seller Store</div><h2 style="margin:2px 0 4px;font-size:20px;">${v46Esc(shopName)}</h2><div style="font-size:12px;color:#666;">${products.length}টি Product</div></div></div><h3 style="margin:10px 0 14px;">More from Store</h3><div class="product-grid">${cards || '<p style="color:#777;">এই দোকানে এখনো কোনো Product নেই।</p>'}</div></div></body></html>`);
+} catch(e) { next(e); }
 });
 
 app.get('/product/:id', async (req, res, next) => {
 try {
 let product = await Product.findById(req.params.id);
 if (!product) return res.send('Product not found');
-let sellerForProduct = product.ownerId ? await User.findById(String(product.ownerId)).lean() : null;
 let chats = await Chat.find({ productId: product._id });
 let reviews = await Review.find({ productId: product._id }).sort({ _id: -1 });
 let relatedProducts = await Product.find({ category: product.category, _id: { $ne:
@@ -1070,6 +1057,11 @@ const savedProductQty = Number(req.cookies[productQtyCookieName]) || 1;
 let currentQtyFromQuery = req.query.qty !== undefined ? (Number(req.query.qty) || 1) : savedProductQty;
 let currentQty = Math.min(allowedMax, Math.max(1, Math.floor(currentQtyFromQuery)));
 res.cookie(productQtyCookieName, String(currentQty), {httpOnly:false, sameSite:'lax', maxAge:30*24*60*60*1000});
+let seller = null;
+if (product.ownerId) { seller = await User.findById(product.ownerId).select('name email role subAdminShopName phone').lean(); }
+if (!seller) { seller = await User.findOne({ role:'admin' }).select('name email role subAdminShopName phone').lean(); }
+const sellerStoreId = seller && seller._id ? String(seller._id) : '';
+const sellerStoreName = (seller && (seller.subAdminShopName || seller.name || seller.email)) || 'Online Shop';
 let selectedGalleryIndex = Math.max(0, allImages.findIndex(x => String(x) === requestedPreviewImage));
 if (selectedGalleryIndex < 0) selectedGalleryIndex = 0;
 let galleryHTML = galleryData.map((item, idx) => {
@@ -1089,7 +1081,7 @@ let chatsHTML = chats.map(c => {
 }).join('');
 let reviewsHTML = reviews.map(r => ` <div style="border-bottom:1px solid #eee; padding:8px 0; font-size:13px;"> <p style="margin:0 0 2px 0;"><b>${r.userEmail}</b> - <span style="color:#ff9800; font-weight:bold;">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span></p> <p style="margin:0; color:#444;">${r.comment}</p> </div> `).join('');
 let relatedHTML = relatedProducts.map(p => ` <div class="product-card" onclick="window.location.href='/product/${p._id}'"> <img src="${mediaUrl(p.mainImage)}" alt="${p.name}" onclick="event.stopPropagation(); openImageModal('${mediaUrl(p.mainImage)}');"> <h4 style="font-size:13px; height:32px;">${p.name}</h4> <div class="price" style="font-size:15px;">৳${p.price}</div> </div> `).join(''); 
-res.send(` <!DOCTYPE html> <html> <head><title>${product.name}</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="background:white; padding:15px; border-radius:6px;"> <div style="display:flex; gap:20px; flex-wrap:wrap;"> <div style="width:100%; max-width:320px; margin:0 auto;"> <img id="mainProductImg" src="${mediaUrl(requestedPreviewImage)}" style="width:100%; height:300px; object-fit:cover; border-radius:6px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(this.src)"><br> <div id="productGallery" style="display:flex; gap:8px; margin-top:10px; overflow-x:auto; padding:2px;">${galleryHTML}</div> </div> <div style="flex:1; min-width: 260px;"> <h2 style="font-size:18px; margin-top:0;">${product.name}</h2> <p style="font-size:13px; color:#666;"><b>Category:</b> ${product.category}</p> <div class="price">৳${product.price}</div> ${product.ownerId ? (()=>{ const seller = sellerForProduct; const shopName = seller ? (seller.subAdminShopName || seller.name || (seller.role === 'admin' ? 'Main Admin Store' : 'Seller Store')) : 'Seller Store'; const initial = String(shopName).trim().charAt(0).toUpperCase() || 'S'; return `<div style="margin:10px 0;padding:10px;background:#fff8f2;border:1px solid #ffd8c2;border-radius:9px;display:flex;align-items:center;gap:10px;"><div style="width:42px;height:42px;border-radius:50%;background:#f85606;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;">${initial}</div><div style="flex:1;"><div style="font-size:11px;color:#777;">Sold by</div><a href="/store/${encodeURIComponent(String(product.ownerId))}" style="font-size:14px;font-weight:700;color:#222;text-decoration:none;">${shopName}</a></div><a href="/store/${encodeURIComponent(String(product.ownerId))}" class="btn" style="padding:7px 11px;font-size:12px;">🏪 Visit Store</a></div>`; })() : ''} ${isCustomerLike(req.user) ? `<form action="/wishlist/toggle/${product._id}" method="POST" style="margin:8px 0;"><button type="submit" class="btn" style="background:#e91e63;color:#fff;padding:7px 12px;">❤️ ${Array.isArray(req.user.wishlist) && req.user.wishlist.map(String).includes(String(product._id)) ? 'Remove from Wishlist' : 'Add to Wishlist'}</button></form>` : ''} <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock}</p> <p style="font-size:13px; color:#d9534f;"><b>Maximum Order Limit:</b> ${product.maxOrderLimit || 5}</p> <p style="font-size:13px; color:#007bff;"><b>Delivery Charge:</b> ৳${product.deliveryCharge || 150}</p> <p style="font-size:14px; color:#440;">${product.description}</p> <br> <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;"> <span style="font-weight:600; font-size:13px;">Quantity:</span> <button type="button" id="qtyMinusBtn" aria-label="Decrease quantity" onclick="decrementQty(event);" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:pointer; position:relative; z-index:9999; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none;">−</button> <input id="qtyInput" type="number" min="1" max="${allowedMax}" step="1" value="${currentQty}" aria-label="Quantity" style="width:55px; padding:6px 4px; font-size:16px; font-weight:bold; text-align:center; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"> <button type="button" id="qtyPlusBtn" aria-label="Increase quantity" onclick="incrementQty(event);" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:pointer; position:relative; z-index:9999; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none;">+</button> </div> <div style="display: flex; gap: 10px; flex-wrap:wrap;"> <a id="buyNowBtn" href="/buy-now/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn btn-buy" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center;">Buy Now</a> <a id="addToCartBtn" href="/api/add-to-cart/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#28a745;">🛒Add to Cart</a> ${getProductWhatsAppUrl(product) ? `<a href="${getProductWhatsAppUrl(product)}" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#25D366; color:#fff; text-decoration:none;">💬 WhatsApp-এ কথা বলুন</a>` : ''} </div> </div> </div> <script>
+res.send(` <!DOCTYPE html> <html> <head><title>${product.name}</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="background:white; padding:15px; border-radius:6px;"> <div style="display:flex; gap:20px; flex-wrap:wrap;"> <div style="width:100%; max-width:320px; margin:0 auto;"> <img id="mainProductImg" src="${mediaUrl(requestedPreviewImage)}" style="width:100%; height:300px; object-fit:cover; border-radius:6px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(this.src)"><br> <div id="productGallery" style="display:flex; gap:8px; margin-top:10px; overflow-x:auto; padding:2px;">${galleryHTML}</div> </div> <div style="flex:1; min-width: 260px;"> <h2 style="font-size:18px; margin-top:0;">${product.name}</h2> <p style="font-size:13px; color:#666;"><b>Category:</b> ${product.category}</p> <div class="price">৳${product.price}</div> ${isCustomerLike(req.user) ? `<form action="/wishlist/toggle/${product._id}" method="POST" style="margin:8px 0;"><button type="submit" class="btn" style="background:#e91e63;color:#fff;padding:7px 12px;">❤️ ${Array.isArray(req.user.wishlist) && req.user.wishlist.map(String).includes(String(product._id)) ? 'Remove from Wishlist' : 'Add to Wishlist'}</button></form>` : ''} <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock}</p> <p style="font-size:13px; color:#d9534f;"><b>Maximum Order Limit:</b> ${product.maxOrderLimit || 5}</p> <p style="font-size:13px; color:#007bff;"><b>Delivery Charge:</b> ৳${product.deliveryCharge || 150}</p> <p style="font-size:14px; color:#440;">${product.description}</p> <br> <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;"> <span style="font-weight:600; font-size:13px;">Quantity:</span> <button type="button" id="qtyMinusBtn" aria-label="Decrease quantity" onclick="decrementQty(event);" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:pointer; position:relative; z-index:9999; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none;">−</button> <input id="qtyInput" type="number" min="1" max="${allowedMax}" step="1" value="${currentQty}" aria-label="Quantity" style="width:55px; padding:6px 4px; font-size:16px; font-weight:bold; text-align:center; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"> <button type="button" id="qtyPlusBtn" aria-label="Increase quantity" onclick="incrementQty(event);" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:pointer; position:relative; z-index:9999; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none;">+</button> </div> <div style="display: flex; gap: 10px; flex-wrap:wrap;"> <a id="buyNowBtn" href="/buy-now/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn btn-buy" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center;">Buy Now</a> <a id="addToCartBtn" href="/api/add-to-cart/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#28a745;">🛒Add to Cart</a> ${getProductWhatsAppUrl(product) ? `<a href="${getProductWhatsAppUrl(product)}" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#25D366; color:#fff; text-decoration:none;">💬 WhatsApp-এ কথা বলুন</a>` : ''} </div> </div> </div> <script>
 const galleryImages = ${JSON.stringify(galleryData)};
 let currentQty = ${currentQty};
 const productMaxLimit = Math.max(0, Number(${Number(product.maxOrderLimit || 5)}) || 5);
@@ -1123,44 +1115,24 @@ function refreshQtyUI() {
   if (plus) { plus.disabled = allowedMax <= 1 || currentQty >= allowedMax; plus.style.opacity = plus.disabled ? '0.5' : '1'; plus.style.cursor = plus.disabled ? 'not-allowed' : 'pointer'; }
   updateOrderLinks();
 }
-let qtyRequestToken = 0;
-let qtyPersistTimer = null;
-function persistProductQtyValue(q) {
-  const id = ${JSON.stringify(String(product._id))};
-  const token = ++qtyRequestToken;
-  const url = '/api/product-qty/' + encodeURIComponent(id) + '/set?qty=' + encodeURIComponent(q) + '&ajax=1';
-  clearTimeout(qtyPersistTimer);
-  qtyPersistTimer = setTimeout(function(){
-    fetch(url, {method:'GET', credentials:'same-origin', cache:'no-store', headers:{'Accept':'application/json','X-Requested-With':'XMLHttpRequest'}})
-      .then(function(r){ return r.text(); })
-      .then(function(text){
-        let d=null; try { d=JSON.parse(text); } catch(e) {}
-        if (token !== qtyRequestToken) return;
-        if (d && d.success && Number.isFinite(Number(d.quantity))) {
-          currentQty=Math.max(1,Math.floor(Number(d.quantity)));
-          refreshQtyUI();
-        }
-      }).catch(function(){ /* UI remains usable even if persistence is temporarily unavailable. */ });
-  }, 60);
+function saveProductQtyCookie() {
+  try {
+    document.cookie = productQtyCookieName + '=' + encodeURIComponent(String(currentQty)) + '; path=/; max-age=2592000; samesite=lax';
+  } catch (_) {}
 }
 function incrementQty(ev) {
   if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-  const max = Math.min(Math.max(1, productMaxLimit || 1), Math.max(0, productStock || 0));
-  if (max < 1) { alert('এই পণ্যের Stock শেষ।'); return false; }
-  if (currentQty < max) {
-    currentQty += 1;
-    refreshQtyUI();
-    persistProductQtyValue(currentQty);
-  }
+  const max = Math.max(1, Number(allowedMax) || 1);
+  if (currentQty < max) currentQty += 1;
+  refreshQtyUI();
+  saveProductQtyCookie();
   return false;
 }
 function decrementQty(ev) {
   if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-  if (currentQty > 1) {
-    currentQty -= 1;
-    refreshQtyUI();
-    persistProductQtyValue(currentQty);
-  }
+  if (currentQty > 1) currentQty -= 1;
+  refreshQtyUI();
+  saveProductQtyCookie();
   return false;
 }
 function adjustProductQty(delta, ev) {
@@ -1168,29 +1140,24 @@ function adjustProductQty(delta, ev) {
 }
 function setProductQtyFromInput(value) {
   let q = Math.floor(Number(value));
-  const max = Math.max(1, allowedMax || 1);
+  const max = Math.max(1, Number(allowedMax) || 1);
   if (!Number.isFinite(q)) q = 1;
   q = Math.max(1, Math.min(q, max));
   currentQty = q;
   refreshQtyUI();
-  const id = ${JSON.stringify(String(product._id))};
-  fetch('/api/product-qty/' + encodeURIComponent(id) + '/set?qty=' + encodeURIComponent(q) + '&ajax=1', {credentials:'same-origin', cache:'no-store', headers:{'Accept':'application/json','X-Requested-With':'XMLHttpRequest'}}).catch(function(){});
+  saveProductQtyCookie();
   return false;
 }
+window.incrementQty = incrementQty;
+window.decrementQty = decrementQty;
+window.adjustProductQty = adjustProductQty;
+window.setProductQtyFromInput = setProductQtyFromInput;
 document.addEventListener('DOMContentLoaded', function(){
   const input = document.getElementById('qtyInput');
   if (input) {
     input.addEventListener('change', function(){ setProductQtyFromInput(this.value); });
-    input.addEventListener('input', function(){
-      const n = Number(this.value);
-      if (Number.isFinite(n) && n >= 1) { currentQty = Math.min(Math.floor(n), Math.max(1, allowedMax || 1)); updateOrderLinks(); }
-    });
   }
   refreshQtyUI();
-  const minusBtn=document.getElementById('qtyMinusBtn');
-  const plusBtn=document.getElementById('qtyPlusBtn');
-  if(minusBtn && !minusBtn.dataset.qtyBound){ minusBtn.dataset.qtyBound='1'; minusBtn.addEventListener('click', function(e){ decrementQty(e); }); }
-  if(plusBtn && !plusBtn.dataset.qtyBound){ plusBtn.dataset.qtyBound='1'; plusBtn.addEventListener('click', function(e){ incrementQty(e); }); }
 });
 function setMainProductImage(index, element) {
   const item = galleryImages[Number(index)];
@@ -1238,7 +1205,7 @@ function initProductControls() {
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initProductControls);
 else initProductControls();
-</script> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ratings & Reviews</h3> <form action="/api/add-review" method="POST" style="background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:15px;"> <input type="hidden" name="productId" value="${product._id}"> <label style="font-size:13px; font-weight:600;">Rate this product:</label> <select name="rating" style="padding:5px; margin-bottom:8px; border-radius:4px; border:1px solid #ccc;" required> <option value="5">★★★★★ (5 Stars)</option> <option value="4">★★★★☆ (4 Stars)</option> <option value="3">★★★☆☆ (3 Stars)</option> <option value="2">★★☆☆☆ (2 Stars)</option> <option value="1">★☆☆☆☆ (1 Star)</option> </select><br> <textarea name="comment" placeholder="Write your review here..." style="width:100%; height:50px; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required></textarea> <button type="submit" class="btn" style="padding:6px 12px; font-size:12px; margin-top:5px;">Submit Review</button> </form> <div>${reviewsHTML.length ? reviewsHTML : '<p style="color:#777; font-size:13px;">No reviews yet.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>You May Also Like</h3> <div class="product-grid" style="margin-top:10px;">${relatedHTML.length ? relatedHTML : '<p>No related products.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ask Question About This Product</h3> <form action="/api/chat" method="POST"> <input type="hidden" name="productId" value="${product._id}"> <input type="hidden" name="productName" value="${product.name}"> <input type="hidden" name="productImage" value="${product.mainImage}"> <textarea name="message" placeholder="Ask your question here..." style="width:100%; height:70px; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea><br> <button type="submit" class="btn" style="margin-top:6px; padding:8px 14px;">Send Question</button> </form> <div style="margin-top:20px;"> <h4 style="margin-bottom:10px;">Customer Q&A (পণ্যের বিষয়ে আপনার ও এডমিনের কথোপকথন):</h4> ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions yet.</p>'} </div> </div> </body> </html> `);
+</script> <div style="margin-top:18px;background:#fff;border:1px solid #eee;border-radius:10px;padding:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><div style="width:58px;height:58px;border-radius:50%;background:#f85606;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px;">🏪</div><div style="flex:1;min-width:180px;"><div style="font-size:11px;color:#777;">Sold by</div><a href="/store/${encodeURIComponent(String(sellerStoreId))}" style="font-size:16px;font-weight:700;color:#222;text-decoration:none;">${v46Esc(sellerStoreName)}</a><div style="font-size:11px;color:#777;margin-top:2px;">${seller && seller.role==='subadmin' ? 'Seller Shop' : 'Main Admin Store'}</div></div><a href="/store/${encodeURIComponent(String(sellerStoreId))}" class="btn" style="padding:8px 14px;background:#f85606;">🏪 Visit Store</a></div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ratings & Reviews</h3> <form action="/api/add-review" method="POST" style="background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:15px;"> <input type="hidden" name="productId" value="${product._id}"> <label style="font-size:13px; font-weight:600;">Rate this product:</label> <select name="rating" style="padding:5px; margin-bottom:8px; border-radius:4px; border:1px solid #ccc;" required> <option value="5">★★★★★ (5 Stars)</option> <option value="4">★★★★☆ (4 Stars)</option> <option value="3">★★★☆☆ (3 Stars)</option> <option value="2">★★☆☆☆ (2 Stars)</option> <option value="1">★☆☆☆☆ (1 Star)</option> </select><br> <textarea name="comment" placeholder="Write your review here..." style="width:100%; height:50px; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;" required></textarea> <button type="submit" class="btn" style="padding:6px 12px; font-size:12px; margin-top:5px;">Submit Review</button> </form> <div>${reviewsHTML.length ? reviewsHTML : '<p style="color:#777; font-size:13px;">No reviews yet.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>You May Also Like</h3> <div class="product-grid" style="margin-top:10px;">${relatedHTML.length ? relatedHTML : '<p>No related products.</p>'}</div> <hr style="margin:30px 0; border:0; border-top:1px solid #eee;"> <h3>Ask Question About This Product</h3> <form action="/api/chat" method="POST"> <input type="hidden" name="productId" value="${product._id}"> <input type="hidden" name="productName" value="${product.name}"> <input type="hidden" name="productImage" value="${product.mainImage}"> <textarea name="message" placeholder="Ask your question here..." style="width:100%; height:70px; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea><br> <button type="submit" class="btn" style="margin-top:6px; padding:8px 14px;">Send Question</button> </form> <div style="margin-top:20px;"> <h4 style="margin-bottom:10px;">Customer Q&A (পণ্যের বিষয়ে আপনার ও এডমিনের কথোপকথন):</h4> ${chatsHTML.length ? chatsHTML : '<p style="color:#777; font-size:13px;">No questions yet.</p>'} </div> </div> </body> </html> `);
 } catch (err) {
 next(err);
 }
