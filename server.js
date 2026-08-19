@@ -1,4 +1,4 @@
-// V78: Fix duplicate/failed quantity button handling. Base: V77.
+// V79: Robust quantity controls using direct inline handlers + server fallback. Base: V78.
 // Preserves V69 search/scroll/reply fixes and all prior features.
 require('dotenv').config();
 const express = require('express');
@@ -1046,7 +1046,7 @@ let chatsHTML = chats.map(c => {
 }).join('');
 let reviewsHTML = reviews.map(r => ` <div style="border-bottom:1px solid #eee; padding:8px 0; font-size:13px;"> <p style="margin:0 0 2px 0;"><b>${r.userEmail}</b> - <span style="color:#ff9800; font-weight:bold;">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span></p> <p style="margin:0; color:#444;">${r.comment}</p> </div> `).join('');
 let relatedHTML = relatedProducts.map(p => ` <div class="product-card" onclick="window.location.href='/product/${p._id}'"> <img src="${mediaUrl(p.mainImage)}" alt="${p.name}" onclick="event.stopPropagation(); openImageModal('${mediaUrl(p.mainImage)}');"> <h4 style="font-size:13px; height:32px;">${p.name}</h4> <div class="price" style="font-size:15px;">৳${p.price}</div> </div> `).join(''); 
-res.send(` <!DOCTYPE html> <html> <head><title>${product.name}</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="background:white; padding:15px; border-radius:6px;"> <div style="display:flex; gap:20px; flex-wrap:wrap;"> <div style="width:100%; max-width:320px; margin:0 auto;"> <img id="mainProductImg" src="${mediaUrl(requestedPreviewImage)}" style="width:100%; height:300px; object-fit:cover; border-radius:6px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(this.src)"><br> <div id="productGallery" style="display:flex; gap:8px; margin-top:10px; overflow-x:auto; padding:2px;">${galleryHTML}</div> </div> <div style="flex:1; min-width: 260px;"> <h2 style="font-size:18px; margin-top:0;">${product.name}</h2> <p style="font-size:13px; color:#666;"><b>Category:</b> ${product.category}</p> <div class="price">৳${product.price}</div> ${isCustomerLike(req.user) ? `<form action="/wishlist/toggle/${product._id}" method="POST" style="margin:8px 0;"><button type="submit" class="btn" style="background:#e91e63;color:#fff;padding:7px 12px;">❤️ ${Array.isArray(req.user.wishlist) && req.user.wishlist.map(String).includes(String(product._id)) ? 'Remove from Wishlist' : 'Add to Wishlist'}</button></form>` : ''} <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock}</p> <p style="font-size:13px; color:#d9534f;"><b>Maximum Order Limit:</b> ${product.maxOrderLimit || 5}</p> <p style="font-size:13px; color:#007bff;"><b>Delivery Charge:</b> ৳${product.deliveryCharge || 150}</p> <p style="font-size:14px; color:#440;">${product.description}</p> <br> <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;"> <span style="font-weight:600; font-size:13px;">Quantity:</span> <button type="button" id="qtyMinusBtn" aria-label="Decrease quantity" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:pointer; position:relative; z-index:50; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none;">−</button> <span id="qtyDisplay" style="font-size:16px; font-weight:bold; min-width:25px; text-align:center;">${currentQty}</span> <button type="button" id="qtyPlusBtn" aria-label="Increase quantity" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:pointer; position:relative; z-index:50; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none;">+</button> </div> <div style="display: flex; gap: 10px; flex-wrap:wrap;"> <a id="buyNowBtn" href="/buy-now/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn btn-buy" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center;">Buy Now</a> <a id="addToCartBtn" href="/api/add-to-cart/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#28a745;">🛒Add to Cart</a> ${getProductWhatsAppUrl(product) ? `<a href="${getProductWhatsAppUrl(product)}" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#25D366; color:#fff; text-decoration:none;">💬 WhatsApp-এ কথা বলুন</a>` : ''} </div> </div> </div> <script>
+res.send(` <!DOCTYPE html> <html> <head><title>${product.name}</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="background:white; padding:15px; border-radius:6px;"> <div style="display:flex; gap:20px; flex-wrap:wrap;"> <div style="width:100%; max-width:320px; margin:0 auto;"> <img id="mainProductImg" src="${mediaUrl(requestedPreviewImage)}" style="width:100%; height:300px; object-fit:cover; border-radius:6px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(this.src)"><br> <div id="productGallery" style="display:flex; gap:8px; margin-top:10px; overflow-x:auto; padding:2px;">${galleryHTML}</div> </div> <div style="flex:1; min-width: 260px;"> <h2 style="font-size:18px; margin-top:0;">${product.name}</h2> <p style="font-size:13px; color:#666;"><b>Category:</b> ${product.category}</p> <div class="price">৳${product.price}</div> ${isCustomerLike(req.user) ? `<form action="/wishlist/toggle/${product._id}" method="POST" style="margin:8px 0;"><button type="submit" class="btn" style="background:#e91e63;color:#fff;padding:7px 12px;">❤️ ${Array.isArray(req.user.wishlist) && req.user.wishlist.map(String).includes(String(product._id)) ? 'Remove from Wishlist' : 'Add to Wishlist'}</button></form>` : ''} <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock}</p> <p style="font-size:13px; color:#d9534f;"><b>Maximum Order Limit:</b> ${product.maxOrderLimit || 5}</p> <p style="font-size:13px; color:#007bff;"><b>Delivery Charge:</b> ৳${product.deliveryCharge || 150}</p> <p style="font-size:14px; color:#440;">${product.description}</p> <br> <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;"> <span style="font-weight:600; font-size:13px;">Quantity:</span> <button type="button" id="qtyMinusBtn" aria-label="Decrease quantity" onclick="return decrementQty(event);" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:pointer; position:relative; z-index:9999; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none;">−</button> <span id="qtyDisplay" style="font-size:16px; font-weight:bold; min-width:25px; text-align:center;">${currentQty}</span> <button type="button" id="qtyPlusBtn" aria-label="Increase quantity" onclick="return incrementQty(event);" style="padding:6px 12px; font-size:16px; font-weight:bold; background:#ddd; color:#000; border:0; border-radius:4px; cursor:pointer; position:relative; z-index:9999; pointer-events:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none;">+</button> </div> <div style="display: flex; gap: 10px; flex-wrap:wrap;"> <a id="buyNowBtn" href="/buy-now/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn btn-buy" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center;">Buy Now</a> <a id="addToCartBtn" href="/api/add-to-cart/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#28a745;">🛒Add to Cart</a> ${getProductWhatsAppUrl(product) ? `<a href="${getProductWhatsAppUrl(product)}" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#25D366; color:#fff; text-decoration:none;">💬 WhatsApp-এ কথা বলুন</a>` : ''} </div> </div> </div> <script>
 const galleryImages = ${JSON.stringify(galleryData)};
 let currentQty = ${currentQty};
 const productMaxLimit = Math.max(0, Number(${Number(product.maxOrderLimit || 5)}) || 5);
@@ -1079,51 +1079,61 @@ function refreshQtyUI() {
   updateOrderLinks();
 }
 let qtyBusy = false;
-async function persistProductQty(action) {
+let qtyRequestToken = 0;
+async function persistProductQty(action, optimisticQty) {
   const id = ${JSON.stringify(String(product._id))};
+  const ajaxUrl = '/api/product-qty/' + encodeURIComponent(id) + '/' + action + '?ajax=1';
   const fallback = '/api/product-qty/' + encodeURIComponent(id) + '/' + action;
-  if (qtyBusy) return;
-  qtyBusy = true;
+  const token = ++qtyRequestToken;
   try {
-    const r = await fetch(fallback + '?ajax=1', {credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}, cache:'no-store'});
+    const r = await fetch(ajaxUrl, {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: {'Accept':'application/json','X-Requested-With':'XMLHttpRequest'}
+    });
     const text = await r.text();
     let d = null;
     try { d = JSON.parse(text); } catch (_) {}
     if (r.ok && d && d.success && Number.isFinite(Number(d.quantity))) {
-      currentQty = Number(d.quantity);
-      refreshQtyUI();
-      return;
+      if (token === qtyRequestToken) {
+        currentQty = Math.max(1, Math.floor(Number(d.quantity)));
+        refreshQtyUI();
+      }
+      return true;
     }
-    // If the AJAX response is not JSON (login/HTML/error), use the normal GET route.
+    // Server returned HTML/login/error: use the normal redirect route.
     window.location.href = fallback;
-  } catch (_) {
+    return false;
+  } catch (e) {
     window.location.href = fallback;
-  } finally {
-    qtyBusy = false;
+    return false;
   }
 }
-function incrementQty() {
+function incrementQty(ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  const max = Math.min(productMaxLimit || 1, productStock || 0);
   if (qtyBusy) return false;
-  const max = allowedMax > 0 ? allowedMax : 1;
-  if (currentQty < max) {
-    currentQty += 1;
-    refreshQtyUI();
-    persistProductQty('inc');
-  }
+  if (max < 1) { alert('এই পণ্যের Stock শেষ।'); return false; }
+  if (currentQty >= max) { alert('Maximum Order Limit / Stock অনুযায়ী আর বেশি নেওয়া যাবে না।'); return false; }
+  currentQty += 1;
+  refreshQtyUI();
+  qtyBusy = true;
+  persistProductQty('inc', currentQty).finally(() => { qtyBusy = false; });
   return false;
 }
-function decrementQty() {
+function decrementQty(ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
   if (qtyBusy) return false;
-  if (currentQty > 1) {
-    currentQty -= 1;
-    refreshQtyUI();
-    persistProductQty('dec');
-  }
+  if (currentQty <= 1) return false;
+  currentQty -= 1;
+  refreshQtyUI();
+  qtyBusy = true;
+  persistProductQty('dec', currentQty).finally(() => { qtyBusy = false; });
   return false;
 }
-function adjustProductQty(delta) {
-  if (Number(delta) > 0) return incrementQty();
-  return decrementQty();
+function adjustProductQty(delta, ev) {
+  return Number(delta) > 0 ? incrementQty(ev) : decrementQty(ev);
 }
 function setMainProductImage(index, element) {
   const item = galleryImages[Number(index)];
@@ -1136,7 +1146,7 @@ function setMainProductImage(index, element) {
   main.setAttribute('data-selected-image', selectedImage);
   document.querySelectorAll('.thumb-img').forEach(t => { t.style.border = '1px solid #ccc'; });
   document.querySelectorAll('.thumb-link').forEach(t => t.setAttribute('aria-current','false'));
-  const thumb = element || document.querySelector('.thumb-btn[data-gallery-index=\"' + Number(index) + '\"]');
+  const thumb = element || document.querySelector('.thumb-link[data-gallery-index="' + Number(index) + '"]');
   if (thumb) {
     const image = thumb.classList && thumb.classList.contains('thumb-img') ? thumb : thumb.querySelector('.thumb-img');
     if (image) image.style.border = '2px solid #f85606';
@@ -1151,19 +1161,18 @@ window.decrementQty = decrementQty;
 window.adjustProductQty = adjustProductQty;
 window.setMainProductImage = setMainProductImage;
 function bindProductControlEvents() {
-  if (window.__productQtyEventsBound) return;
-  window.__productQtyEventsBound = true;
-  const plus = document.getElementById('qtyPlusBtn');
-  const minus = document.getElementById('qtyMinusBtn');
+  // Quantity buttons use direct inline onclick handlers. This avoids duplicate
+  // or late event-listener binding problems on dynamically rendered pages.
   const gallery = document.getElementById('productGallery');
-  if (plus) plus.addEventListener('click', function(ev){ ev.preventDefault(); ev.stopPropagation(); incrementQty(); }, {passive:false});
-  if (minus) minus.addEventListener('click', function(ev){ ev.preventDefault(); ev.stopPropagation(); decrementQty(); }, {passive:false});
-  if (gallery) gallery.addEventListener('click', function(ev){
-    const thumb = ev.target.closest('.thumb-link');
-    if (!thumb || !gallery.contains(thumb)) return;
-    ev.preventDefault(); ev.stopPropagation();
-    setMainProductImage(Number(thumb.dataset.galleryIndex), thumb);
-  }, {passive:false});
+  if (gallery && !gallery.dataset.bound) {
+    gallery.dataset.bound = '1';
+    gallery.addEventListener('click', function(ev){
+      const thumb = ev.target.closest('.thumb-link');
+      if (!thumb || !gallery.contains(thumb)) return;
+      ev.preventDefault(); ev.stopPropagation();
+      setMainProductImage(Number(thumb.dataset.galleryIndex), thumb);
+    }, {passive:false});
+  }
 }
 function initProductControls() {
   bindProductControlEvents();
@@ -1370,7 +1379,7 @@ try { cart = req.cookies.cart ? JSON.parse(req.cookies.cart) : []; if (!Array.is
 let subtotal = cart.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0);
 let maxDeliveryCharge = cart.length > 0 ? Math.max(...cart.map(i => i.deliveryCharge ||
 150)) : 150;
-let cartItemsHTML = cart.map(item => ` <div id="cartItem-${item.productId}" data-cart-item="${item.productId}" style="display:flex; justify-content:space-between; align-items:center; background:#f9f9f9; padding:10px; margin-bottom:10px; border-radius:4px; flex-wrap:wrap; gap:10px;"> <div style="display:flex; align-items:center; gap:10px;"><input type="checkbox" class="cartSelect" value="${item.productId}" checked onchange="updateSelectedCheckout()" style="width:18px;height:18px;"> <img src="${mediaUrl(item.mainImage)}" width="50" height="50" style="object-fit:cover; border-radius:4px; border:1px solid #f85606; cursor:pointer;" onclick="openImageModal('${mediaUrl(item.mainImage)}')"> <div> <h4 style="margin:0 0 4px 0; font-size:14px;">${item.productName}</h4> <p id="cartLineTotal-${item.productId}" style="margin:0; color:#f85606; font-weight:bold;">৳${item.price} × ${item.quantity || 1} = ৳${item.price * (item.quantity || 1)}</p> <p style="margin:2px 0 0 0; font-size:11px; color:#555;">ডেলিভারি চার্জ : ৳${item.deliveryCharge || 150}</p> </div> </div> <div style="display:flex; align-items:center; gap:15px;"> <div style="display:flex; align-items:center; gap:6px;"> <button type="button" data-cart-qty="dec" data-product-id="${item.productId}" class="btn" style="padding:2px 8px; font-size:14px; background:#ccc; color:#000; min-width:34px; cursor:pointer; touch-action:manipulation;">−</button> <span id="cartQty-${item.productId}" style="font-weight:bold; font-size:14px; min-width:24px; text-align:center;">${item.quantity || 1}</span> <button type="button" data-cart-qty="inc" data-product-id="${item.productId}" class="btn" style="padding:2px 8px; font-size:14px; background:#ccc; color:#000; min-width:34px; cursor:pointer; touch-action:manipulation;">+</button> </div> <button type="button" data-cart-remove="1" data-product-id="${item.productId}" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px;">Remove</button> </div> </div> `).join('');
+let cartItemsHTML = cart.map(item => ` <div id="cartItem-${item.productId}" data-cart-item="${item.productId}" style="display:flex; justify-content:space-between; align-items:center; background:#f9f9f9; padding:10px; margin-bottom:10px; border-radius:4px; flex-wrap:wrap; gap:10px;"> <div style="display:flex; align-items:center; gap:10px;"><input type="checkbox" class="cartSelect" value="${item.productId}" checked onchange="updateSelectedCheckout()" style="width:18px;height:18px;"> <img src="${mediaUrl(item.mainImage)}" width="50" height="50" style="object-fit:cover; border-radius:4px; border:1px solid #f85606; cursor:pointer;" onclick="openImageModal('${mediaUrl(item.mainImage)}')"> <div> <h4 style="margin:0 0 4px 0; font-size:14px;">${item.productName}</h4> <p id="cartLineTotal-${item.productId}" style="margin:0; color:#f85606; font-weight:bold;">৳${item.price} × ${item.quantity || 1} = ৳${item.price * (item.quantity || 1)}</p> <p style="margin:2px 0 0 0; font-size:11px; color:#555;">ডেলিভারি চার্জ : ৳${item.deliveryCharge || 150}</p> </div> </div> <div style="display:flex; align-items:center; gap:15px;"> <div style="display:flex; align-items:center; gap:6px;"> <button type="button" data-cart-qty="dec" data-product-id="${item.productId}" class="btn" onclick="return quickCartQty(event,this);" style="padding:2px 8px; font-size:14px; background:#ccc; color:#000; min-width:34px; cursor:pointer; touch-action:manipulation; position:relative;z-index:9999;pointer-events:auto;">−</button> <span id="cartQty-${item.productId}" style="font-weight:bold; font-size:14px; min-width:24px; text-align:center;">${item.quantity || 1}</span> <button type="button" data-cart-qty="inc" data-product-id="${item.productId}" class="btn" onclick="return quickCartQty(event,this);" style="padding:2px 8px; font-size:14px; background:#ccc; color:#000; min-width:34px; cursor:pointer; touch-action:manipulation; position:relative;z-index:9999;pointer-events:auto;">+</button> </div> <button type="button" data-cart-remove="1" data-product-id="${item.productId}" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px;">Remove</button> </div> </div> `).join('');
 let checkoutBtn = cart.length > 0 ? `<a id="checkoutSelectedBtn" href="/cart-checkout?selected=${encodeURIComponent(cart.map(i=>String(i.productId)).join(','))}" class="btn btn-buy" style="width:100%; text-align:center; padding:12px; margin-top:15px; display:block; font-size:16px;">Proceed to Checkout (Selected)</a>` : '';
 res.send(` <!DOCTYPE html> <html> <head><title>Shopping Cart</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="max-width:700px; background:white; padding:20px; border-radius:6px;"> <h3 style="margin-top:0;">🛒Shopping Cart</h3> ${cart.length ? `<label style="display:flex;align-items:center;gap:7px;margin-bottom:10px;font-size:13px;font-weight:600;"><input type="checkbox" id="selectAllCart" checked onchange="toggleAllCart(this)" style="width:18px;height:18px;"> Select All Products</label>` : ''} ${cartItemsHTML.length ? cartItemsHTML : '<p style="color:#777; text-align:center; padding:30px;">Your cart is empty.</p>'} ${cart.length > 0 ? `<hr style="border:0; border-top:1px solid #ddd; margin:15px 0;"><h4 style="text-align:right; margin:0;">Subtotal: ৳<span id="cartSubtotal">${subtotal}</span> <br><span
 style="font-size:13px; color:#666;">Standard Delivery Charge:
@@ -1390,23 +1399,29 @@ function updateCartTotals(d){const subtotalEl=document.getElementById('cartSubto
 window.quickCartQty = async function(ev, btn){
   if (ev) { ev.preventDefault(); ev.stopPropagation(); }
   if (!btn || btn.disabled) return false;
-  btn.disabled = true;
   const id = btn.getAttribute('data-product-id');
   const action = btn.getAttribute('data-cart-qty');
+  if (!id || (action !== 'inc' && action !== 'dec')) return false;
+  btn.disabled = true;
   const fallbackUrl = '/api/update-cart-qty/' + encodeURIComponent(id) + '/' + action;
   try {
-    const r = await fetch(fallbackUrl + '?ajax=1', {credentials:'same-origin', cache:'no-store', headers:{'X-Requested-With':'XMLHttpRequest'}});
+    const r = await fetch(fallbackUrl + '?ajax=1', {method:'GET',credentials:'same-origin',cache:'no-store',headers:{'Accept':'application/json','X-Requested-With':'XMLHttpRequest'}});
     const text = await r.text(); let d=null; try{d=JSON.parse(text);}catch(_){ }
     if (!r.ok || !d || !d.success) {
       if (d && d.message) alert(d.message); else window.location.href=fallbackUrl;
       return false;
     }
     const item=(d.cart||[]).find(x=>String(x.productId)===String(id));
-    if(!item){document.getElementById('cartItem-'+id)?.remove();const selectAll=document.getElementById('selectAllCart');if(selectAll)selectAll.checked=false;}
-    else{const q=document.getElementById('cartQty-'+id);if(q)q.textContent=String(item.quantity||1);const line=document.getElementById('cartLineTotal-'+id);if(line)line.textContent='৳'+((Number(item.price)||0)*(Number(item.quantity)||1));}
+    if(!item){
+      const row=document.getElementById('cartItem-'+id); if(row) row.remove();
+      const selectAll=document.getElementById('selectAllCart'); if(selectAll) selectAll.checked=false;
+    } else {
+      const q=document.getElementById('cartQty-'+id); if(q) q.textContent=String(item.quantity||1);
+      const line=document.getElementById('cartLineTotal-'+id); if(line) line.textContent='৳'+((Number(item.price)||0)*(Number(item.quantity)||1));
+    }
     updateCartTotals(d); updateSelectedCheckout();
-  }catch(_){ window.location.href=fallbackUrl; }
-  finally{ btn.disabled=false; }
+  } catch(_){ window.location.href=fallbackUrl; }
+  finally { btn.disabled=false; }
   return false;
 };
 document.addEventListener('click',async function(e){
