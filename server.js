@@ -526,19 +526,23 @@ function orderBelongsToUser(order, user) {
 // different cookies and select the correct one from the route context.
 function wantsStaffSession(req) {
   const p = String(req.path || '');
+  // Shared pages such as Inbox/Messages/Notifications can be opened by both
+  // customers and staff. They are intentionally handled separately below so
+  // an old staff cookie can never hijack a normal customer's session.
+  if (p === '/request-inbox' || p === '/api/request-chat/unread-count' || p === '/messages' || p === '/notifications' || p === '/api/notifications/unread-count') return false;
   return p === '/staff-login' ||
     p === '/staff-logout' ||
     p === '/staff-manifest.webmanifest' ||
     p === '/api/staff-login' ||
     p === '/api/staff-app-context' ||
     p === '/api/product-requests' ||
-    p === '/notifications' ||
-    p === '/api/notifications/unread-count' ||
-    p === '/request-inbox' ||
-    p === '/api/request-chat/unread-count' ||
-    p === '/messages' ||
     p === '/admin-dashboard' ||
     p.startsWith('/admin/');
+}
+
+function isSharedSessionPath(req) {
+  const p = String(req.path || '');
+  return p === '/request-inbox' || p === '/api/request-chat/unread-count' || p === '/messages' || p === '/notifications' || p === '/api/notifications/unread-count';
 }
 
 async function loadSessionUser(raw) {
@@ -557,9 +561,25 @@ async function loadSessionUser(raw) {
 // from leaking into the normal Chrome shop.
 app.use(async (req, res, next) => {
   try {
+    const sharedPath = isSharedSessionPath(req);
     const staffContext = wantsStaffSession(req);
-    const raw = staffContext ? req.cookies?.staffSession : req.cookies?.userSession;
-    const user = await loadSessionUser(raw);
+    let user = null;
+    // IMPORTANT: Inbox/Messages/Notifications are available to customers and
+    // staff on the same origin. Prefer an explicit customer session when it
+    // exists; only fall back to the staff session when there is no customer
+    // session. This prevents a stale staff/admin cookie from opening the Main
+    // Admin dashboard when a customer clicks the bottom Inbox tab.
+    if (sharedPath) {
+      const customerUser = await loadSessionUser(req.cookies?.userSession);
+      if (customerUser) {
+        user = customerUser;
+      } else {
+        user = await loadSessionUser(req.cookies?.staffSession);
+      }
+    } else {
+      const raw = staffContext ? req.cookies?.staffSession : req.cookies?.userSession;
+      user = await loadSessionUser(raw);
+    }
     if (user) {
       if (user.role === 'subadmin' && user.subAdminStatus === 'active' && !user.unlimitedFree && user.activationExpiresAt && new Date(user.activationExpiresAt).getTime() < Date.now()) {
         user.subAdminStatus = 'expired';
@@ -576,7 +596,7 @@ app.use(async (req, res, next) => {
     } else {
       req.user = null;
     }
-    req.staffSessionContext = staffContext;
+    req.staffSessionContext = sharedPath ? !!(user && ['admin','subadmin','staff'].includes(user.role) && !req.cookies?.userSession) : staffContext;
   } catch (e) {
     req.user = null;
   }
