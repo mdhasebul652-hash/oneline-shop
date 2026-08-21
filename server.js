@@ -1894,6 +1894,16 @@ app.get('/register', (req, res) => {
 let redirectUrl = req.query.redirect || '/dashboard';
 res.send(` <!DOCTYPE html> <html> <head><title>Register</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="max-width:350px; background:white; padding:20px; border-radius:6px; margin-top:30px; box-shadow:0 2px 5px rgba(0,0,0,0.1);"> <h3 style="margin-top:0;">Register Account</h3> <form action="/api/register" method="POST"> <input type="hidden" name="redirect" value="${redirectUrl}"> <label style="font-size:13px; font-weight:600;">Email:</label><br> <input type="email" name="email" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600;">Password:</label><br> <input type="password" name="password" style="width:100%; padding:10px; margin:4px 0 15px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <button type="submit" class="btn btn-buy" style="width:100%; padding:10px;">Register</button> </form> <p style="font-size:13px; text-align:center; margin-top:15px;">Already have an account? <a href="/login?redirect=${encodeURIComponent(redirectUrl)}">Login here</a></p> </div> </body> </html> `);
 });
+// Terms of Service পেজ
+app.get('/terms', (req, res) => {
+    res.send('<h2>Terms of Service</h2><p>Welcome to our online shop. By using our service, you agree to these terms.</p>');
+});
+
+// Privacy Policy পেজ
+app.get('/privacy', (req, res) => {
+    res.send('<h2>Privacy Policy</h2><p>Your privacy is important to us. We protect your data securely.</p>');
+});
+
 // ================= Sub Admin Registration / Approval =================
 app.get('/sub-admin/apply', (req, res) => res.redirect('/sub-admin/register'));
 app.get('/sub-admin/register', (req, res) => {
