@@ -188,8 +188,6 @@ activationExpiresAt: { type: Date, default: null },
 unlimitedFree: { type: Boolean, default: false },
 subAdminShopName: { type: String, default: '' },
 subAdminShopLogo: { type: String, default: '' },
-// Per-owner Guest/Facebook COD control. Each seller/admin controls only their own products.
-guestCodDisabled: { type: Boolean, default: false },
 subAdminBusinessInfo: { type: String, default: '' },
 subAdminWhatsApp: { type: String, default: '' },
 subAdminBusinessCategories: { type: [String], default: [] },
@@ -258,8 +256,6 @@ paidAmount: Number,
 trxId: String,
 status: { type: String, default: 'Pending' },
 previousStatus: { type: String, default: 'Pending' },
-isGuestOrder: { type: Boolean, default: false },
-orderSource: { type: String, default: 'web' },
 createdAt: { type: Date, default: Date.now }
 });
 const Order = mongoose.model('Order', orderSchema);
@@ -448,23 +444,6 @@ function isSubAdmin(user) { return !!user && user.role === 'subadmin'; }
 function isEmployee(user) { return !!user && user.role === 'staff' && user.staffStatus === 'active'; }
 function dataOwnerId(user) { return isEmployee(user) && user.staffParentAdminId ? String(user.staffParentAdminId) : String(user && user._id || ''); }
 function sellerBlocksCustomer(customer, sellerId) { const sid=String(sellerId||'').trim(); return !!(customer && sid && Array.isArray(customer.codBlockedBySellerIds) && customer.codBlockedBySellerIds.map(String).includes(sid)); }
-async function guestCodBlockedSellerIds(sellerIds) {
-  const ids=[...new Set((Array.isArray(sellerIds)?sellerIds:[]).map(String).map(x=>x.trim()).filter(Boolean))];
-  if(!ids.length) return [];
-  const rows=await User.find({_id:{$in:ids}}).select('_id guestCodDisabled role').lean();
-  const blocked=new Set(rows.filter(u=>u && u.guestCodDisabled===true).map(u=>String(u._id)));
-  return ids.filter(id=>blocked.has(String(id)));
-}
-async function guestCodBlockedForProduct(product) {
-  if(!product) return false;
-  const ownerId=String(product.ownerId||'').trim();
-  if(!ownerId) {
-    const admin=await User.findOne({role:'admin'}).select('_id guestCodDisabled').lean();
-    return !!(admin && admin.guestCodDisabled===true);
-  }
-  const owner=await User.findById(ownerId).select('guestCodDisabled').lean();
-  return !!(owner && owner.guestCodDisabled===true);
-}
 function sellerBlockedIdsForCustomer(customer, sellerIds) { return (Array.isArray(sellerIds)?sellerIds:[]).map(String).filter(Boolean).filter(id=>sellerBlocksCustomer(customer,id)); }
 function isStaff(user) { return isMainAdmin(user) || isSubAdmin(user) || isEmployee(user); }
 // Users with a Sub Admin application that is not yet active must continue using the shop as normal customers.
@@ -548,19 +527,23 @@ function orderBelongsToUser(order, user) {
 // different cookies and select the correct one from the route context.
 function wantsStaffSession(req) {
   const p = String(req.path || '');
+  // Shared pages such as Inbox/Messages/Notifications can be opened by both
+  // customers and staff. They are intentionally handled separately below so
+  // an old staff cookie can never hijack a normal customer's session.
+  if (p === '/request-inbox' || p === '/api/request-chat/unread-count' || p === '/messages' || p === '/notifications' || p === '/api/notifications/unread-count') return false;
   return p === '/staff-login' ||
     p === '/staff-logout' ||
     p === '/staff-manifest.webmanifest' ||
     p === '/api/staff-login' ||
     p === '/api/staff-app-context' ||
     p === '/api/product-requests' ||
-    p === '/notifications' ||
-    p === '/api/notifications/unread-count' ||
-    p === '/request-inbox' ||
-    p === '/api/request-chat/unread-count' ||
-    p === '/messages' ||
     p === '/admin-dashboard' ||
     p.startsWith('/admin/');
+}
+
+function isSharedSessionPath(req) {
+  const p = String(req.path || '');
+  return p === '/request-inbox' || p === '/api/request-chat/unread-count' || p === '/messages' || p === '/notifications' || p === '/api/notifications/unread-count';
 }
 
 async function loadSessionUser(raw) {
@@ -579,9 +562,25 @@ async function loadSessionUser(raw) {
 // from leaking into the normal Chrome shop.
 app.use(async (req, res, next) => {
   try {
+    const sharedPath = isSharedSessionPath(req);
     const staffContext = wantsStaffSession(req);
-    const raw = staffContext ? req.cookies?.staffSession : req.cookies?.userSession;
-    const user = await loadSessionUser(raw);
+    let user = null;
+    // IMPORTANT: Inbox/Messages/Notifications are available to customers and
+    // staff on the same origin. Prefer an explicit customer session when it
+    // exists; only fall back to the staff session when there is no customer
+    // session. This prevents a stale staff/admin cookie from opening the Main
+    // Admin dashboard when a customer clicks the bottom Inbox tab.
+    if (sharedPath) {
+      const customerUser = await loadSessionUser(req.cookies?.userSession);
+      if (customerUser) {
+        user = customerUser;
+      } else {
+        user = await loadSessionUser(req.cookies?.staffSession);
+      }
+    } else {
+      const raw = staffContext ? req.cookies?.staffSession : req.cookies?.userSession;
+      user = await loadSessionUser(raw);
+    }
     if (user) {
       if (user.role === 'subadmin' && user.subAdminStatus === 'active' && !user.unlimitedFree && user.activationExpiresAt && new Date(user.activationExpiresAt).getTime() < Date.now()) {
         user.subAdminStatus = 'expired';
@@ -598,7 +597,7 @@ app.use(async (req, res, next) => {
     } else {
       req.user = null;
     }
-    req.staffSessionContext = staffContext;
+    req.staffSessionContext = sharedPath ? !!(user && ['admin','subadmin','staff'].includes(user.role) && !req.cookies?.userSession) : staffContext;
   } catch (e) {
     req.user = null;
   }
@@ -998,10 +997,8 @@ try {
   const storeId = String(req.params.id || '');
   let owner = null, products = [], storeName = 'Main Admin Store', storeLogo = '';
   if (storeId === 'main-admin' || storeId === 'admin' || !storeId) {
-    owner = await User.findOne({role:'admin'}).select('name email role subAdminShopName subAdminShopLogo').lean();
+    owner = await User.findOne({role:'admin'}).select('name email role').lean();
     const mainAdminId = owner ? String(owner._id) : '';
-    storeName = owner && owner.subAdminShopName ? owner.subAdminShopName : 'Main Admin Store';
-    storeLogo = owner && owner.subAdminShopLogo ? owner.subAdminShopLogo : '';
     products = mainAdminId
       ? await Product.find({$or:[{ownerId:mainAdminId},{ownerId:''},{ownerId:null}]}).sort({_id:-1}).lean()
       : await Product.find({$or:[{ownerId:''},{ownerId:null}]}).sort({_id:-1}).lean();
@@ -1010,7 +1007,7 @@ try {
     owner = await User.findById(storeId).select('name email role subAdminShopName subAdminShopLogo subAdminStatus').lean();
     if (!owner || !['admin','subadmin'].includes(owner.role)) return res.status(404).send('Store not found');
     products = await Product.find({ownerId:String(owner._id)}).sort({_id:-1}).lean();
-    storeName = owner.role === 'subadmin' ? (owner.subAdminShopName || owner.name || owner.email || 'Seller Store') : 'Main Admin Store';
+    storeName = owner.subAdminShopName || (owner.role === 'subadmin' ? (owner.name || owner.email || 'Seller Store') : 'Main Admin Store');
     storeLogo = owner.subAdminShopLogo || '';
   }
   const logoHTML = storeLogo
@@ -1102,11 +1099,8 @@ if (product.ownerId && mongoose.Types.ObjectId.isValid(String(product.ownerId)))
   if (seller) sellerStoreId = String(seller._id);
 }
 if (!seller) seller = await User.findOne({role:'admin'}).select('name email role subAdminShopName subAdminShopLogo').lean();
-let sellerStoreName = seller && seller.role === 'subadmin' ? (seller.subAdminShopName || seller.name || seller.email || 'Seller Shop') : 'Main Admin Store';
+let sellerStoreName = seller && seller.subAdminShopName ? seller.subAdminShopName : (seller && seller.role === 'subadmin' ? (seller.name || seller.email || 'Seller Shop') : 'Main Admin Store');
 let sellerLogo = seller && seller.subAdminShopLogo ? seller.subAdminShopLogo : '';
-let isFashionProduct = ['fashion','ফ্যাশন'].includes(String(product.category || '').trim().toLowerCase());
-let requestedSize = safeText(req.query.size || '', 80);
-let orderSource = safeText(req.query.source || '', 40);
 let chats = await Chat.find({ productId: product._id });
 let reviews = await Review.find({ productId: product._id }).sort({ _id: -1 });
 let relatedProducts = await Product.find({ category: product.category, _id: { $ne:
@@ -1142,21 +1136,19 @@ let chatsHTML = chats.map(c => {
 }).join('');
 let reviewsHTML = reviews.map(r => ` <div style="border-bottom:1px solid #eee; padding:8px 0; font-size:13px;"> <p style="margin:0 0 2px 0;"><b>${r.userEmail}</b> - <span style="color:#ff9800; font-weight:bold;">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span></p> <p style="margin:0; color:#444;">${r.comment}</p> </div> `).join('');
 let relatedHTML = relatedProducts.map(p => ` <div class="product-card" onclick="window.location.href='/product/${p._id}'"> <img src="${mediaUrl(p.mainImage)}" alt="${p.name}" onclick="event.stopPropagation(); openImageModal('${mediaUrl(p.mainImage)}');"> <h4 style="font-size:13px; height:32px;">${p.name}</h4> <div class="price" style="font-size:15px;">৳${p.price}</div> </div> `).join(''); 
-res.send(` <!DOCTYPE html> <html> <head><title>${product.name}</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="background:white; padding:15px; border-radius:6px;"> <div style="display:flex; gap:20px; flex-wrap:wrap;"> <div style="width:100%; max-width:320px; margin:0 auto;"> <img id="mainProductImg" src="${mediaUrl(requestedPreviewImage)}" style="width:100%; height:300px; object-fit:cover; border-radius:6px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(this.src)"><br> <div id="productGallery" style="display:flex; gap:8px; margin-top:10px; overflow-x:auto; padding:2px;">${galleryHTML}</div> </div> <div style="flex:1; min-width: 260px;"> <h2 style="font-size:18px; margin-top:0;">${product.name}</h2> <p style="font-size:13px; color:#666;"><b>Category:</b> ${product.category}</p> <div class="price">৳${product.price}</div> ${isCustomerLike(req.user) ? `<form action="/wishlist/toggle/${product._id}" method="POST" style="margin:8px 0;"><button type="submit" class="btn" style="background:#e91e63;color:#fff;padding:7px 12px;">❤️ ${Array.isArray(req.user.wishlist) && req.user.wishlist.map(String).includes(String(product._id)) ? 'Remove from Wishlist' : 'Add to Wishlist'}</button></form>` : ''} <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock}</p> <p style="font-size:13px; color:#d9534f;"><b>Maximum Order Limit:</b> ${product.maxOrderLimit || 5}</p> <p style="font-size:13px; color:#007bff;"><b>Delivery Charge:</b> ৳${product.deliveryCharge || 150}</p> <p style="font-size:14px; color:#440;">${product.description}</p> ${isFashionProduct ? `<div style="margin:12px 0 14px 0;padding:10px;background:#fff8f0;border:1px solid #ffd7bf;border-radius:8px;"><label for="productSizeInput" style="display:block;font-weight:700;font-size:13px;color:#f85606;margin-bottom:6px;">👕 আপনার এই পণ্যটি কোন সাইজ লাগবে?</label><input id="productSizeInput" type="text" maxlength=80 value="${v46Esc(requestedSize)}" placeholder="যেমন: M, L, XL, 40, 42 অথবা আপনার প্রয়োজনীয় সাইজ লিখুন" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:14px;"><small style="display:block;color:#777;margin-top:5px;">অর্ডার করার আগে আপনার প্রয়োজনীয় সাইজ এখানে লিখে দিন।</small></div>` : ''} <br> <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
+res.send(` <!DOCTYPE html> <html> <head><title>${product.name}</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="background:white; padding:15px; border-radius:6px;"> <div style="display:flex; gap:20px; flex-wrap:wrap;"> <div style="width:100%; max-width:320px; margin:0 auto;"> <img id="mainProductImg" src="${mediaUrl(requestedPreviewImage)}" style="width:100%; height:300px; object-fit:cover; border-radius:6px; border:1px solid #ddd; cursor:pointer;" onclick="openImageModal(this.src)"><br> <div id="productGallery" style="display:flex; gap:8px; margin-top:10px; overflow-x:auto; padding:2px;">${galleryHTML}</div> </div> <div style="flex:1; min-width: 260px;"> <h2 style="font-size:18px; margin-top:0;">${product.name}</h2> <p style="font-size:13px; color:#666;"><b>Category:</b> ${product.category}</p> <div class="price">৳${product.price}</div> ${isCustomerLike(req.user) ? `<form action="/wishlist/toggle/${product._id}" method="POST" style="margin:8px 0;"><button type="submit" class="btn" style="background:#e91e63;color:#fff;padding:7px 12px;">❤️ ${Array.isArray(req.user.wishlist) && req.user.wishlist.map(String).includes(String(product._id)) ? 'Remove from Wishlist' : 'Add to Wishlist'}</button></form>` : ''} <p style="font-size:13px;"><b>Stock Available:</b> ${product.stock}</p> <p style="font-size:13px; color:#d9534f;"><b>Maximum Order Limit:</b> ${product.maxOrderLimit || 5}</p> <p style="font-size:13px; color:#007bff;"><b>Delivery Charge:</b> ৳${product.deliveryCharge || 150}</p> <p style="font-size:14px; color:#440;">${product.description}</p> <br> <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
 <span style="font-weight:600; font-size:13px;">Quantity:</span>
 <button type="button" id="qtyMinusBtn" aria-label="Decrease quantity" onclick="return window.__osQtyChange(-1,event);" style="width:42px;height:42px;padding:0;font-size:22px;font-weight:bold;background:#ddd;color:#000;border:1px solid #ccc;border-radius:6px;cursor:pointer;position:relative;z-index:10001;pointer-events:auto;touch-action:manipulation;user-select:none;-webkit-user-select:none;">−</button>
 <span id="qtyValue" aria-live="polite" style="display:inline-flex;align-items:center;justify-content:center;min-width:55px;height:42px;padding:0 10px;font-size:17px;font-weight:700;border:1px solid #ccc;border-radius:6px;background:#fff;">${currentQty}</span>
 <button type="button" id="qtyPlusBtn" aria-label="Increase quantity" onclick="return window.__osQtyChange(1,event);" style="width:42px;height:42px;padding:0;font-size:22px;font-weight:bold;background:#ddd;color:#000;border:1px solid #ccc;border-radius:6px;cursor:pointer;position:relative;z-index:10001;pointer-events:auto;touch-action:manipulation;user-select:none;-webkit-user-select:none;">+</button>
 <span id="qtyLimitText" style="font-size:11px;color:#777;">Max: ${allowedMax}</span>
-</div> <div style="display: flex; gap: 10px; flex-wrap:wrap;"> <a id="buyNowBtn" href="/buy-now/${product._id}?qty=${currentQty}&size=${encodeURIComponent(requestedSize)}&source=${encodeURIComponent(orderSource)}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn btn-buy" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center;">Buy Now</a> <a id="addToCartBtn" href="/api/add-to-cart/${product._id}?qty=${currentQty}&size=${encodeURIComponent(requestedSize)}&source=${encodeURIComponent(orderSource)}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#28a745;">🛒Add to Cart</a> ${getProductWhatsAppUrl(product) ? `<a href="${getProductWhatsAppUrl(product)}" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#25D366; color:#fff; text-decoration:none;">💬 WhatsApp-এ কথা বলুন</a>` : ''} </div> </div> </div> <script>
+</div> <div style="display: flex; gap: 10px; flex-wrap:wrap;"> <a id="buyNowBtn" href="/buy-now/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn btn-buy" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center;">Buy Now</a> <a id="addToCartBtn" href="/api/add-to-cart/${product._id}?qty=${currentQty}&selectedImage=${encodeURIComponent(String(requestedPreviewImage || ''))}" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#28a745;">🛒Add to Cart</a> ${getProductWhatsAppUrl(product) ? `<a href="${getProductWhatsAppUrl(product)}" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1; min-width:140px; padding:12px; font-size:15px; text-align:center; background:#25D366; color:#fff; text-decoration:none;">💬 WhatsApp-এ কথা বলুন</a>` : ''} </div> </div> </div> <script>
 (function(){
   const galleryImages = ${JSON.stringify(galleryData)};
   const productId = ${JSON.stringify(String(product._id))};
   const maxAllowed = ${Number(allowedMax)};
   let currentQty = ${Number(currentQty)};
   let selectedImage = ${JSON.stringify(requestedPreviewImage)};
-  let requestedSizeValue = ${JSON.stringify(requestedSize)};
-  const orderSourceValue = ${JSON.stringify(orderSource)};
 
   function clampQty(q){
     q = Math.floor(Number(q));
@@ -1168,12 +1160,10 @@ res.send(` <!DOCTYPE html> <html> <head><title>${product.name}</title>${globalHe
     const q = clampQty(currentQty);
     currentQty = q;
     const img = encodeURIComponent(selectedImage || '');
-    const size = encodeURIComponent((requestedSizeValue || '').trim());
-    const source = encodeURIComponent(orderSourceValue || '');
     const buy = document.getElementById('buyNowBtn');
     const cart = document.getElementById('addToCartBtn');
-    if(buy) buy.href = '/buy-now/' + encodeURIComponent(productId) + '?qty=' + q + '&size=' + size + '&source=' + source + '&selectedImage=' + img;
-    if(cart) cart.href = '/api/add-to-cart/' + encodeURIComponent(productId) + '?qty=' + q + '&size=' + size + '&source=' + source + '&selectedImage=' + img;
+    if(buy) buy.href = '/buy-now/' + encodeURIComponent(productId) + '?qty=' + q + '&selectedImage=' + img;
+    if(cart) cart.href = '/api/add-to-cart/' + encodeURIComponent(productId) + '?qty=' + q + '&selectedImage=' + img;
   }
 
   function renderQty(){
@@ -1188,9 +1178,6 @@ res.send(` <!DOCTYPE html> <html> <head><title>${product.name}</title>${globalHe
   }
 
   // UI changes immediately. Saving the quantity is fire-and-forget and can never block +/−.
-  const sizeInput = document.getElementById('productSizeInput');
-  if(sizeInput){ sizeInput.addEventListener('input', function(){ requestedSizeValue = String(sizeInput.value || '').slice(0,80); updateOrderLinks(); }); }
-
   function saveQty(){
     try{
       fetch('/api/product-qty/' + encodeURIComponent(productId) + '/set?qty=' + encodeURIComponent(currentQty) + '&ajax=1', {
@@ -1354,8 +1341,6 @@ try {
 let productId = req.params.id;
 let requestedQty = Number(req.query.qty) || 1;
 let selectedImage = req.query.selectedImage || '';
-let selectedSize = safeText(req.query.size || '', 80);
-let orderSource = safeText(req.query.source || 'web', 40);
 let product = await Product.findById(productId);
 if (!product) return res.send(`<script>alert('Product not found!'); window.history.back();</script>`);
 if (!selectedImage) selectedImage = product.mainImage;
@@ -1365,7 +1350,8 @@ let cart = [];
 try { cart = req.cookies.cart ? JSON.parse(req.cookies.cart) : []; if (!Array.isArray(cart)) cart = []; } catch (_) { cart = []; }
 let maxLimit = Math.min(Number(product.maxOrderLimit || 5), Math.max(0, Number(product.stock) || 0));
 let itemDeliveryCharge = product.deliveryCharge || 150;
-let existingIndex = cart.findIndex(item => item.productId === productId && item.mainImage === selectedImage && String(item.size || '') === selectedSize);
+let existingIndex = cart.findIndex(item => item.productId === productId && item.mainImage
+=== selectedImage);
 if (existingIndex > -1) {
 let newTotalQty = cart[existingIndex].quantity + requestedQty;
 if (newTotalQty > maxLimit) {
@@ -1381,8 +1367,6 @@ productName: product.name,
 price: product.price,
 deliveryCharge: itemDeliveryCharge,
 mainImage: selectedImage,
-size: selectedSize,
-orderSource,
 quantity: requestedQty,
 maxOrderLimit: maxLimit,
 ownerId: String(product.ownerId || '')
@@ -1453,7 +1437,7 @@ try { cart = req.cookies.cart ? JSON.parse(req.cookies.cart) : []; if (!Array.is
 let subtotal = cart.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0);
 let maxDeliveryCharge = cart.length > 0 ? Math.max(...cart.map(i => i.deliveryCharge ||
 150)) : 150;
-let cartItemsHTML = cart.map(item => ` <div id="cartItem-${item.productId}" data-cart-item="${item.productId}" style="display:flex; justify-content:space-between; align-items:center; background:#f9f9f9; padding:10px; margin-bottom:10px; border-radius:4px; flex-wrap:wrap; gap:10px;"> <div style="display:flex; align-items:center; gap:10px;"><input type="checkbox" class="cartSelect" value="${item.productId}" checked onchange="updateSelectedCheckout()" style="width:18px;height:18px;"> <img src="${mediaUrl(item.mainImage)}" width="50" height="50" style="object-fit:cover; border-radius:4px; border:1px solid #f85606; cursor:pointer;" onclick="openImageModal('${mediaUrl(item.mainImage)}')"> <div> <h4 style="margin:0 0 4px 0; font-size:14px;">${item.productName}</h4>${item.size ? `<div style="font-size:12px;color:#f85606;"><b>সাইজ:</b> ${v46Esc(item.size)}</div>` : ''} <p id="cartLineTotal-${item.productId}" style="margin:0; color:#f85606; font-weight:bold;">৳${item.price} × ${item.quantity || 1} = ৳${item.price * (item.quantity || 1)}</p> <p style="margin:2px 0 0 0; font-size:11px; color:#555;">ডেলিভারি চার্জ : ৳${item.deliveryCharge || 150}</p> </div> </div> <div style="display:flex; align-items:center; gap:15px;"> <div style="display:flex; align-items:center; gap:6px;"> <button type="button" data-cart-qty="dec" data-product-id="${item.productId}" class="btn" onclick="return quickCartQty(event,this);" style="padding:2px 8px; font-size:14px; background:#ccc; color:#000; min-width:34px; cursor:pointer; touch-action:manipulation; position:relative;z-index:9999;pointer-events:auto;">−</button> <span id="cartQty-${item.productId}" style="font-weight:bold; font-size:14px; min-width:24px; text-align:center;">${item.quantity || 1}</span> <button type="button" data-cart-qty="inc" data-product-id="${item.productId}" class="btn" onclick="return quickCartQty(event,this);" style="padding:2px 8px; font-size:14px; background:#ccc; color:#000; min-width:34px; cursor:pointer; touch-action:manipulation; position:relative;z-index:9999;pointer-events:auto;">+</button> </div> <button type="button" data-cart-remove="1" data-product-id="${item.productId}" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px;">Remove</button> </div> </div> `).join('');
+let cartItemsHTML = cart.map(item => ` <div id="cartItem-${item.productId}" data-cart-item="${item.productId}" style="display:flex; justify-content:space-between; align-items:center; background:#f9f9f9; padding:10px; margin-bottom:10px; border-radius:4px; flex-wrap:wrap; gap:10px;"> <div style="display:flex; align-items:center; gap:10px;"><input type="checkbox" class="cartSelect" value="${item.productId}" checked onchange="updateSelectedCheckout()" style="width:18px;height:18px;"> <img src="${mediaUrl(item.mainImage)}" width="50" height="50" style="object-fit:cover; border-radius:4px; border:1px solid #f85606; cursor:pointer;" onclick="openImageModal('${mediaUrl(item.mainImage)}')"> <div> <h4 style="margin:0 0 4px 0; font-size:14px;">${item.productName}</h4> <p id="cartLineTotal-${item.productId}" style="margin:0; color:#f85606; font-weight:bold;">৳${item.price} × ${item.quantity || 1} = ৳${item.price * (item.quantity || 1)}</p> <p style="margin:2px 0 0 0; font-size:11px; color:#555;">ডেলিভারি চার্জ : ৳${item.deliveryCharge || 150}</p> </div> </div> <div style="display:flex; align-items:center; gap:15px;"> <div style="display:flex; align-items:center; gap:6px;"> <button type="button" data-cart-qty="dec" data-product-id="${item.productId}" class="btn" onclick="return quickCartQty(event,this);" style="padding:2px 8px; font-size:14px; background:#ccc; color:#000; min-width:34px; cursor:pointer; touch-action:manipulation; position:relative;z-index:9999;pointer-events:auto;">−</button> <span id="cartQty-${item.productId}" style="font-weight:bold; font-size:14px; min-width:24px; text-align:center;">${item.quantity || 1}</span> <button type="button" data-cart-qty="inc" data-product-id="${item.productId}" class="btn" onclick="return quickCartQty(event,this);" style="padding:2px 8px; font-size:14px; background:#ccc; color:#000; min-width:34px; cursor:pointer; touch-action:manipulation; position:relative;z-index:9999;pointer-events:auto;">+</button> </div> <button type="button" data-cart-remove="1" data-product-id="${item.productId}" class="btn" style="background:#dc3545; padding:5px 10px; font-size:12px;">Remove</button> </div> </div> `).join('');
 let checkoutBtn = cart.length > 0 ? `<a id="checkoutSelectedBtn" href="/cart-checkout?selected=${encodeURIComponent(cart.map(i=>String(i.productId)).join(','))}" class="btn btn-buy" style="width:100%; text-align:center; padding:12px; margin-top:15px; display:block; font-size:16px;">Proceed to Checkout (Selected)</a>` : '';
 res.send(` <!DOCTYPE html> <html> <head><title>Shopping Cart</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="max-width:700px; background:white; padding:20px; border-radius:6px;"> <h3 style="margin-top:0;">🛒Shopping Cart</h3> ${cart.length ? `<label style="display:flex;align-items:center;gap:7px;margin-bottom:10px;font-size:13px;font-weight:600;"><input type="checkbox" id="selectAllCart" checked onchange="toggleAllCart(this)" style="width:18px;height:18px;"> Select All Products</label>` : ''} ${cartItemsHTML.length ? cartItemsHTML : '<p style="color:#777; text-align:center; padding:30px;">Your cart is empty.</p>'} ${cart.length > 0 ? `<hr style="border:0; border-top:1px solid #ddd; margin:15px 0;"><h4 style="text-align:right; margin:0;">Subtotal: ৳<span id="cartSubtotal">${subtotal}</span> <br><span
 style="font-size:13px; color:#666;">Standard Delivery Charge:
@@ -1534,36 +1518,31 @@ if (cart.length === 0) return res.redirect('/cart');
 const selectedRaw = String(req.query.selected || '').split(',').map(x=>x.trim()).filter(Boolean);
 if (selectedRaw.length) cart = cart.filter(item => selectedRaw.includes(String(item.productId)));
 if (cart.length === 0) return res.redirect('/cart');
-const isGuestOrder = !req.user;
+if (!req.user) {
+return res.redirect('/login?redirect=/cart-checkout');
+}
 let subtotal = cart.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0);
 let deliveryCharge = cart.length > 0 ? Math.max(...cart.map(i => i.deliveryCharge || 150)) :
 150;
 let sellerOwnerIds = [...new Set(cart.map(i => String(i.ownerId || '')).filter(Boolean))];
-if(isGuestOrder && cart.some(i=>!String(i.ownerId||'').trim())) { const mainAdmin=await User.findOne({role:'admin'}).select('_id').lean(); if(mainAdmin) sellerOwnerIds.push(String(mainAdmin._id)); sellerOwnerIds=[...new Set(sellerOwnerIds)]; }
 let siteSetting = sellerOwnerIds.length ? await SiteSetting.findOne({ ownerId: sellerOwnerIds[0] }) : null;
 siteSetting = siteSetting || await SiteSetting.findOne() || { bkashNumber: '01700000000', nagadNumber: '01800000000' };
-const blockedSellerIds = isGuestOrder ? [] : sellerBlockedIdsForCustomer(req.user, sellerOwnerIds);
-const guestBlockedSellerIds = isGuestOrder ? await guestCodBlockedSellerIds(sellerOwnerIds) : [];
-const codBlockedForSelected = !isGuestOrder && (!!req.user.isBlocked || blockedSellerIds.length > 0);
-const guestCodBlockedForSelected = isGuestOrder && guestBlockedSellerIds.length > 0;
-let codOptionHTML = (codBlockedForSelected || guestCodBlockedForSelected) ?
-`<p style="color:red; font-size:12px;"><b>Note:</b> ${codBlockedForSelected ? (req.user.isBlocked ? 'আপনার account-এর জন্য COD বন্ধ আছে।' : 'এই Cart-এ এমন Seller-এর Product আছে যিনি আপনার জন্য COD বন্ধ করেছেন। শুধু অন্য Seller-এর Product নির্বাচন করে COD ব্যবহার করুন।') : 'এই Cart-এ এমন Seller-এর Product আছে যিনি Guest/Facebook Order-এর জন্য Cash on Delivery বন্ধ করেছেন। অন্য Seller-এর Product নির্বাচন করে COD ব্যবহার করুন।'}</p>` :
+const blockedSellerIds = sellerBlockedIdsForCustomer(req.user, sellerOwnerIds);
+const codBlockedForSelected = !!req.user.isBlocked || blockedSellerIds.length > 0;
+let codOptionHTML = codBlockedForSelected ?
+`<p style="color:red; font-size:12px;"><b>Note:</b> ${req.user.isBlocked ? 'আপনার account-এর জন্য COD বন্ধ আছে।' : 'এই Cart-এ এমন Seller-এর Product আছে যিনি আপনার জন্য COD বন্ধ করেছেন। শুধু অন্য Seller-এর Product নির্বাচন করে COD ব্যবহার করুন।'}</p>` :
 `<option value="COD">Cash on Delivery</option>`;
-let advanceWarning = (codBlockedForSelected || guestCodBlockedForSelected) ?
-`<div style="background:#fff3cd; padding:10px; border-radius:4px; margin-bottom:10px; color:#856404; font-size:13px;">⚠️<b>COD Notice:</b> ${codBlockedForSelected ? (req.user.isBlocked ? 'আপনার account-এর জন্য COD বন্ধ আছে।' : 'নির্বাচিত Product-এর মধ্যে একজন Seller আপনার জন্য COD বন্ধ করেছেন। অন্য Seller-এর Product COD-এ নিতে চাইলে শুধু সেই Product নির্বাচন করুন।') : 'নির্বাচিত Product-এর মধ্যে একজন Seller Guest/Facebook Order-এর জন্য COD বন্ধ করেছেন। ওই Seller-এর Product COD-এ নিতে হলে Seller-কে Guest COD চালু করতে হবে।'}</div>` : '';
-let guestNotice = isGuestOrder ? `<div style="background:#eef7ff;border:1px solid #cfe8ff;padding:10px;border-radius:7px;margin-bottom:12px;color:#245;font-size:13px;"><b>🛍️ Guest Checkout:</b> Email বা Password ছাড়াই অর্ডার করা যাবে। নাম, ফোন ও ঠিকানা দিলেই হবে।</div>` : '';
-let formName = req.user ? (req.user.name || '') : '';
-let formPhone = req.user ? (req.user.phone || '') : '';
-let itemsSummaryHTML = cart.map(i => ` <div style="display:flex; align-items:center; gap:8px; margin:4px 0;"> <img src="${mediaUrl(i.mainImage)}" width="35" height="35" style="object-fit:cover; border-radius:3px; cursor:pointer;" onclick="openImageModal('${mediaUrl(i.mainImage)}')"> <span style="font-size:13px;">• ${i.productName} (৳${i.price} × ${i.quantity || 1})${i.size ? ` — সাইজ: ${v46Esc(i.size)}` : ''}</span> </div> `).join('');
-res.send(` <!DOCTYPE html> <html> <head><title>Cart Checkout</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="max-width:600px; background:white; padding:20px; border-radius:6px;"> <h3 style="margin-top:0;">Cart Order Checkout</h3> ${guestNotice}${advanceWarning} <div style="background:#f9f9f9; padding:10px; border-radius:4px; margin-bottom:15px;"> <p style="margin:0 0 5px 0; font-weight:bold;">Selected Items:</p> ${itemsSummaryHTML} </div> <form action="/api/place-cart-order" method="POST" onsubmit="return validateAndPrepareOrder()"> <input type="hidden" name="selectedProductIds" value="${cart.map(i=>String(i.productId)).join(',')}"> <input type="hidden" name="discountPrice" id="discountPriceInput" value="0"> <input type="hidden" name="deliveryCharge" value="${deliveryCharge}"> <input type="hidden" name="address" id="fullAddressInput"> <label style="font-size:13px; font-weight:600;">Full Name:</label><br> <input type="text" name="name" value="${v46Esc(formName)}" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600;">Phone Number (বাধ্যতামূলক):</label><br> <input type="text" id="inputPhone" name="phone" value="${v46Esc(formPhone)}" placeholder="যেমন: 017XXXXXXXX" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <!-- সুনির্দিষ্ট ডেলিভারি এড্রেস ঘরসমূহ (বাধ্যতামূলক) --> <div style="background:#fdfdfd; padding:12px; border:1px solid #e0e0e0; border-radius:6px; margin-bottom:10px;"> <label style="font-size:13px; font-weight:600; color:#f85606;">জেলা (District) *:</label><br> <input type="text" id="inputDistrict" placeholder="" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600; color:#f85606;">থানা (Thana / Upazila) *:</label><br> <input type="text" id="inputThana" placeholder="" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600; color:#f85606;">মেইন এড্রেস (গ্রাম / রোড / বাসা নং) *:</label><br> <textarea id="inputVillage" placeholder="" style="width:100%; height:50px; padding:8px; margin:3px 0 5px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea> </div> <label style="font-size:13px; font-weight:600;">Coupon Code:</label><br> <div style="display:flex; gap:5px; margin:4px 0 10px 0;"> <input type="text" name="couponCode" id="couponCodeInput" placeholder="Enter Coupon Code" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;"> <button type="button" onclick="applyCoupon()" class="btn" style="padding:8px 12px; font-size:12px;">Apply</button> </div> <p id="couponMsg" style="font-size:12px; margin:0 0 10px 0; color:green;"></p> <label style="font-size:13px; font-weight:600;">Customer Note:</label><br> <input type="text" name="customerNote" placeholder="" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;"><br> <div style="background:#f0f8ff; padding:12px; border-radius:4px; margin-bottom:12px; font-size:14px; border:1px solid #bce8f1;"> <p style="margin:2px 0;">Subtotal Price: ৳<span id="subtotalPrice">${subtotal}</span></p> <p style="margin:2px 0;">Delivery Charge: ৳<span id="deliveryChargeText">${deliveryCharge}</span></p> <p style="margin:2px 0; color:red; display:none;" id="discountRow">Discount: -৳<span id="discountText">0</span></p> <hr style="border:0; border-top:1px solid #ccc; margin:6px 0;"> <p style="margin:2px 0; font-weight:bold; color:#f85606; font-size:16px;">Total Payable Amount: ৳<span id="totalAmountText">${subtotal + deliveryCharge}</span></p> </div> <label style="font-size:13px; font-weight:600;">Payment Method:</label><br> <select name="paymentMethod" id="paymentMethod" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" onchange="togglePaymentFields()" required> ${codOptionHTML} <option value="bKash">বিকাশ (বিকাশ পার্সোনাল পেমেন্ট)</option> <option value="Nagad">নগদ (নগদ পার্সোনাল পেমেন্ট)</option> </select><br> <div id="onlinePaymentDiv" style="display:${isGuestOrder ? 'none' : (req.user.isBlocked ? 'block' : 'none')}; background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:10px; border:1px dashed #f85606;"> <p style="font-size:13px; color:#333; margin:0 0 6px 0;">বিকাশ: <b style="color:#f85606;">${siteSetting.bkashNumber}</b> | নগদ: <b style="color:#f85606;">${siteSetting.nagadNumber}</b></p> <label style="font-size:12px; font-weight:600;">আপনার বিকাশ/নগদ নাম্বার:</label><br> <input type="text" name="senderNumber" id="senderNumber" placeholder="যেমন: 01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br> <label style="font-size:12px; font-weight:600;">প্রেরিত টাকার পরিমাণ:</label><br> <input type="number" name="paidAmount" id="paidAmount" placeholder="যেমন: মোট টাকা" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br> <label style="font-size:12px; font-weight:600;">ট্রানজেকশন আইডি (TrxID):</label><br> <input type="text" name="trxId" placeholder="যেমন: 9N7A6..." style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"> </div> <button type="submit" class="btn btn-buy" style="width:100%; padding:12px; font-size:16px; margin-top:5px;">⚡Confirm Cart Order</button> </form> </div> <script> let appliedDiscount = 0; let currentDeliveryCharge = ${deliveryCharge}; function validateAndPrepareOrder() { let phone = document.getElementById('inputPhone').value.trim(); let dist = document.getElementById('inputDistrict').value.trim(); let thana = document.getElementById('inputThana').value.trim(); let village = document.getElementById('inputVillage').value.trim(); if(!phone) { alert('দয়া করে আপনার ফোন নম্বর প্রদান করুন!'); return false; } if(!dist || !thana || !village) { alert('ডেলিভারির জন্য জেলা, থানা এবং সম্পূর্ণ ঠিকানা বাধ্যতামূলক!'); return false; } let fullAddr = "জেলা: " + dist + ", থানা: " + thana + ", ঠিকানা: " + village; document.getElementById('fullAddressInput').value = fullAddr; return true; } async function applyCoupon() { let code = document.getElementById('couponCodeInput').value; let msg = document.getElementById('couponMsg'); if(!code) return; try { let res = await fetch('/api/verify-coupon', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code}) }); let data = await res.json(); if(data.success) { appliedDiscount = data.discountAmount; document.getElementById('discountPriceInput').value = appliedDiscount; document.getElementById('discountText').innerText = appliedDiscount; document.getElementById('discountRow').style.display = 'block'; msg.style.color = 'green'; msg.innerText = 'Coupon applied successfully!'; calculateTotal(); } else { msg.style.color = 'red'; msg.innerText = data.message; } } catch(e) { msg.style.color = 'red'; msg.innerText = 'Invalid coupon request.'; } } function calculateTotal() { let subtotal = Number(document.getElementById('subtotalPrice').innerText); let total = (subtotal + currentDeliveryCharge) - appliedDiscount; if(total < 0) total = 0; document.getElementById('totalAmountText').innerText = total; } function togglePaymentFields() { let method = document.getElementById('paymentMethod').value; let div = document.getElementById('onlinePaymentDiv'); let senderInput = document.getElementById('senderNumber'); let amountInput = document.getElementById('paidAmount'); if (method === 'bKash' || method === 'Nagad') { div.style.display = 'block'; senderInput.setAttribute('required', 'true'); amountInput.setAttribute('required', 'true'); } else { div.style.display = 'none'; senderInput.removeAttribute('required'); amountInput.removeAttribute('required'); } } </script> </body> </html> `);
+let advanceWarning = codBlockedForSelected ?
+`<div style="background:#fff3cd; padding:10px; border-radius:4px; margin-bottom:10px; color:#856404; font-size:13px;">⚠️<b>COD Notice:</b> ${req.user.isBlocked ? 'আপনার account-এর জন্য COD বন্ধ আছে।' : 'নির্বাচিত Product-এর মধ্যে একজন Seller আপনার জন্য COD বন্ধ করেছেন। অন্য Seller-এর Product COD-এ নিতে চাইলে শুধু সেই Product নির্বাচন করুন।'}</div>` : '';
+let itemsSummaryHTML = cart.map(i => ` <div style="display:flex; align-items:center; gap:8px; margin:4px 0;"> <img src="${mediaUrl(i.mainImage)}" width="35" height="35" style="object-fit:cover; border-radius:3px; cursor:pointer;" onclick="openImageModal('${mediaUrl(i.mainImage)}')"> <span style="font-size:13px;">• ${i.productName} (৳${i.price} × ${i.quantity || 1})</span> </div> `).join('');
+res.send(` <!DOCTYPE html> <html> <head><title>Cart Checkout</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="max-width:600px; background:white; padding:20px; border-radius:6px;"> <h3 style="margin-top:0;">Cart Order Checkout</h3> ${advanceWarning} <div style="background:#f9f9f9; padding:10px; border-radius:4px; margin-bottom:15px;"> <p style="margin:0 0 5px 0; font-weight:bold;">Selected Items:</p> ${itemsSummaryHTML} </div> <form action="/api/place-cart-order" method="POST" onsubmit="return validateAndPrepareOrder()"> <input type="hidden" name="selectedProductIds" value="${cart.map(i=>String(i.productId)).join(',')}"> <input type="hidden" name="discountPrice" id="discountPriceInput" value="0"> <input type="hidden" name="deliveryCharge" value="${deliveryCharge}"> <input type="hidden" name="address" id="fullAddressInput"> <label style="font-size:13px; font-weight:600;">Full Name:</label><br> <input type="text" name="name" value="${req.user.name || ''}" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600;">Phone Number (বাধ্যতামূলক):</label><br> <input type="text" id="inputPhone" name="phone" value="${req.user.phone || ''}" placeholder="যেমন: 017XXXXXXXX" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <!-- সুনির্দিষ্ট ডেলিভারি এড্রেস ঘরসমূহ (বাধ্যতামূলক) --> <div style="background:#fdfdfd; padding:12px; border:1px solid #e0e0e0; border-radius:6px; margin-bottom:10px;"> <label style="font-size:13px; font-weight:600; color:#f85606;">জেলা (District) *:</label><br> <input type="text" id="inputDistrict" placeholder="" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600; color:#f85606;">থানা (Thana / Upazila) *:</label><br> <input type="text" id="inputThana" placeholder="" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600; color:#f85606;">মেইন এড্রেস (গ্রাম / রোড / বাসা নং) *:</label><br> <textarea id="inputVillage" placeholder="" style="width:100%; height:50px; padding:8px; margin:3px 0 5px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea> </div> <label style="font-size:13px; font-weight:600;">Coupon Code:</label><br> <div style="display:flex; gap:5px; margin:4px 0 10px 0;"> <input type="text" name="couponCode" id="couponCodeInput" placeholder="Enter Coupon Code" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;"> <button type="button" onclick="applyCoupon()" class="btn" style="padding:8px 12px; font-size:12px;">Apply</button> </div> <p id="couponMsg" style="font-size:12px; margin:0 0 10px 0; color:green;"></p> <label style="font-size:13px; font-weight:600;">Customer Note:</label><br> <input type="text" name="customerNote" placeholder="" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;"><br> <div style="background:#f0f8ff; padding:12px; border-radius:4px; margin-bottom:12px; font-size:14px; border:1px solid #bce8f1;"> <p style="margin:2px 0;">Subtotal Price: ৳<span id="subtotalPrice">${subtotal}</span></p> <p style="margin:2px 0;">Delivery Charge: ৳<span id="deliveryChargeText">${deliveryCharge}</span></p> <p style="margin:2px 0; color:red; display:none;" id="discountRow">Discount: -৳<span id="discountText">0</span></p> <hr style="border:0; border-top:1px solid #ccc; margin:6px 0;"> <p style="margin:2px 0; font-weight:bold; color:#f85606; font-size:16px;">Total Payable Amount: ৳<span id="totalAmountText">${subtotal + deliveryCharge}</span></p> </div> <label style="font-size:13px; font-weight:600;">Payment Method:</label><br> <select name="paymentMethod" id="paymentMethod" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" onchange="togglePaymentFields()" required> ${codOptionHTML} <option value="bKash">বিকাশ (বিকাশ পার্সোনাল পেমেন্ট)</option> <option value="Nagad">নগদ (নগদ পার্সোনাল পেমেন্ট)</option> </select><br> <div id="onlinePaymentDiv" style="display:${req.user.isBlocked ? 'block' : 'none'}; background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:10px; border:1px dashed #f85606;"> <p style="font-size:13px; color:#333; margin:0 0 6px 0;">বিকাশ: <b style="color:#f85606;">${siteSetting.bkashNumber}</b> | নগদ: <b style="color:#f85606;">${siteSetting.nagadNumber}</b></p> <label style="font-size:12px; font-weight:600;">আপনার বিকাশ/নগদ নাম্বার:</label><br> <input type="text" name="senderNumber" id="senderNumber" placeholder="যেমন: 01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br> <label style="font-size:12px; font-weight:600;">প্রেরিত টাকার পরিমাণ:</label><br> <input type="number" name="paidAmount" id="paidAmount" placeholder="যেমন: মোট টাকা" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br> <label style="font-size:12px; font-weight:600;">ট্রানজেকশন আইডি (TrxID):</label><br> <input type="text" name="trxId" placeholder="যেমন: 9N7A6..." style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"> </div> <button type="submit" class="btn btn-buy" style="width:100%; padding:12px; font-size:16px; margin-top:5px;">⚡Confirm Cart Order</button> </form> </div> <script> let appliedDiscount = 0; let currentDeliveryCharge = ${deliveryCharge}; function validateAndPrepareOrder() { let phone = document.getElementById('inputPhone').value.trim(); let dist = document.getElementById('inputDistrict').value.trim(); let thana = document.getElementById('inputThana').value.trim(); let village = document.getElementById('inputVillage').value.trim(); if(!phone) { alert('দয়া করে আপনার ফোন নম্বর প্রদান করুন!'); return false; } if(!dist || !thana || !village) { alert('ডেলিভারির জন্য জেলা, থানা এবং সম্পূর্ণ ঠিকানা বাধ্যতামূলক!'); return false; } let fullAddr = "জেলা: " + dist + ", থানা: " + thana + ", ঠিকানা: " + village; document.getElementById('fullAddressInput').value = fullAddr; return true; } async function applyCoupon() { let code = document.getElementById('couponCodeInput').value; let msg = document.getElementById('couponMsg'); if(!code) return; try { let res = await fetch('/api/verify-coupon', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code}) }); let data = await res.json(); if(data.success) { appliedDiscount = data.discountAmount; document.getElementById('discountPriceInput').value = appliedDiscount; document.getElementById('discountText').innerText = appliedDiscount; document.getElementById('discountRow').style.display = 'block'; msg.style.color = 'green'; msg.innerText = 'Coupon applied successfully!'; calculateTotal(); } else { msg.style.color = 'red'; msg.innerText = data.message; } } catch(e) { msg.style.color = 'red'; msg.innerText = 'Invalid coupon request.'; } } function calculateTotal() { let subtotal = Number(document.getElementById('subtotalPrice').innerText); let total = (subtotal + currentDeliveryCharge) - appliedDiscount; if(total < 0) total = 0; document.getElementById('totalAmountText').innerText = total; } function togglePaymentFields() { let method = document.getElementById('paymentMethod').value; let div = document.getElementById('onlinePaymentDiv'); let senderInput = document.getElementById('senderNumber'); let amountInput = document.getElementById('paidAmount'); if (method === 'bKash' || method === 'Nagad') { div.style.display = 'block'; senderInput.setAttribute('required', 'true'); amountInput.setAttribute('required', 'true'); } else { div.style.display = 'none'; senderInput.removeAttribute('required'); amountInput.removeAttribute('required'); } } </script> </body> </html> `);
 } catch (err) {
 next(err);
 }
 });
 app.post('/api/place-cart-order', async (req, res, next) => {
 try {
-const isGuestOrder = !req.user;
-const guestUserEmail = isGuestOrder ? `guest_${Date.now()}_${Math.random().toString(36).slice(2,10)}@guest.local` : req.user.email;
+if (!req.user) return res.redirect('/login');
 let cart = req.cookies.cart ? JSON.parse(req.cookies.cart) : [];
 if (cart.length === 0) return res.redirect('/cart');
 const selectedIds = String(req.body.selectedProductIds || '').split(',').map(x=>x.trim()).filter(Boolean);
@@ -1575,15 +1554,10 @@ if(!phone || !address) {
 return res.send(`<script>alert('ফোন নম্বর এবং ঠিকানা বাধ্যতামূলক!'); window.history.back();</script>`);
 }
 if (paymentMethod === 'COD') {
-  if (req.user && req.user.isBlocked) return res.send(`<script>alert('আপনার account-এর জন্য COD বন্ধ আছে।'); window.history.back();</script>`);
-  let liveSellerIdsForCod=[...new Set(cart.map(item=>String(item.ownerId||'')).filter(Boolean))];
-  if(isGuestOrder && cart.some(item=>!String(item.ownerId||'').trim())) { const mainAdmin=await User.findOne({role:'admin'}).select('_id').lean(); if(mainAdmin) liveSellerIdsForCod.push(String(mainAdmin._id)); liveSellerIdsForCod=[...new Set(liveSellerIdsForCod)]; }
-  const blockedSellerIdsForCod=isGuestOrder ? [] : sellerBlockedIdsForCustomer(req.user,liveSellerIdsForCod);
+  if (req.user.isBlocked) return res.send(`<script>alert('আপনার account-এর জন্য COD বন্ধ আছে।'); window.history.back();</script>`);
+  const liveSellerIdsForCod=[...new Set(cart.map(item=>String(item.ownerId||'')).filter(Boolean))];
+  const blockedSellerIdsForCod=sellerBlockedIdsForCustomer(req.user,liveSellerIdsForCod);
   if(blockedSellerIdsForCod.length) return res.send(`<script>alert('এই Cart-এ এমন Seller-এর Product আছে যিনি আপনার জন্য Cash on Delivery বন্ধ করেছেন। ওই Seller-এর Product বাদ দিয়ে অন্য Seller-এর Product COD-এ অর্ডার করুন।'); window.history.back();</script>`);
-  if(isGuestOrder){
-    const guestBlockedSellerIdsForCod=await guestCodBlockedSellerIds(liveSellerIdsForCod);
-    if(guestBlockedSellerIdsForCod.length) return res.send(`<script>alert('এই Cart-এ এমন Seller-এর Product আছে যিনি Guest/Facebook Order-এর জন্য Cash on Delivery বন্ধ করেছেন। ওই Seller-এর Product বাদ দিয়ে অন্য Seller-এর Product COD-এ অর্ডার করুন।'); window.history.back();</script>`);
-  }
 }
 if ((paymentMethod === 'bKash' || paymentMethod === 'Nagad') && (!senderNumber ||
 !paidAmount)) {
@@ -1598,7 +1572,7 @@ for (const cartItem of cart) {
   if (qty < 1 || qty > maxLimit) return res.send(`<script>alert('${String(product.name).replace(/'/g, "\'")} এর স্টক/সর্বোচ্চ অর্ডার সীমা পরিবর্তিত হয়েছে। কার্ট আপডেট করে আবার চেষ্টা করুন।'); window.location.href='/cart';</script>`);
   const validImages = [product.mainImage, ...((product.additionalImages || []).filter(Boolean))].map(x => String(x));
   const safeImage = validImages.includes(String(cartItem.mainImage || '')) ? String(cartItem.mainImage) : String(product.mainImage || '');
-  liveItems.push({ productId:String(product._id), productName:product.name, price:Number(product.price)||0, deliveryCharge:Number(product.deliveryCharge)||150, mainImage:safeImage, size:safeText(cartItem.size || '',80), orderSource:safeText(cartItem.orderSource || 'web',40), quantity:qty, maxOrderLimit:maxLimit, ownerId:String(product.ownerId||'') });
+  liveItems.push({ productId:String(product._id), productName:product.name, price:Number(product.price)||0, deliveryCharge:Number(product.deliveryCharge)||150, mainImage:safeImage, quantity:qty, maxOrderLimit:maxLimit, ownerId:String(product.ownerId||'') });
 }
 cart = liveItems;
 let dCharge = cart.length ? Math.max(...cart.map(item => item.deliveryCharge || 150)) : 150;
@@ -1607,7 +1581,7 @@ let sellerIds = [...new Set(cart.map(item => String(item.ownerId || '')).filter(
 let discount = Math.max(0, Number(discountPrice) || 0);
 if (discount > productPrice + dCharge) discount = productPrice + dCharge;
 let totalAmount = (productPrice + dCharge) - discount;
-if (req.user) await User.findByIdAndUpdate(req.user._id, { name, phone, address });
+await User.findByIdAndUpdate(req.user._id, { name, phone, address });
 const decremented = [];
 try {
   for (const item of cart) {
@@ -1618,7 +1592,7 @@ try {
     decremented.push({ productId: item.productId, quantity: item.quantity });
   }
   const savedOrder = await new Order({
-  userEmail: guestUserEmail,
+  userEmail: req.user.email,
   userName: name || '',
   userPhone: phone || '',
   userAddress: address || '',
@@ -1635,9 +1609,7 @@ try {
   paidAmount: Number(paidAmount) || 0,
   trxId: trxId || '',
   status: 'Pending',
-  previousStatus: 'Pending',
-  isGuestOrder,
-  orderSource: safeText(orderSource || 'web', 40)
+  previousStatus: 'Pending'
   }).save();
   await createOrderOwnerNotifications(savedOrder);
 } catch (orderErr) {
@@ -1650,7 +1622,7 @@ try {
   throw orderErr;
 }
 res.clearCookie('cart');
-res.send(`<script>alert(${JSON.stringify(isGuestOrder ? 'Order placed successfully! আপনার Guest Order গ্রহণ করা হয়েছে।' : 'Order placed successfully!')}); window.location.href='${isGuestOrder ? '/' : '/my-orders'}';</script>`);
+res.send(`<script>alert('Order placed successfully!'); window.location.href='/my-orders';</script>`);
 } catch (err) {
 next(err);
 }
@@ -1660,11 +1632,11 @@ app.get('/buy-now/:id', async (req, res, next) => {
 try {
 let product = await Product.findById(req.params.id);
 if (!product) return res.send('Product not found');
-const isGuestOrder = !req.user;
+if (!req.user) {
+return res.redirect('/login?redirect=/buy-now/' + product._id);
+}
 let qty = Number(req.query.qty) || 1;
 let selectedImage = req.query.selectedImage || product.mainImage;
-let selectedSize = safeText(req.query.size || '', 80);
-let orderSource = safeText(req.query.source || 'web', 40);
 const buyNowValidImages = [product.mainImage, ...((product.additionalImages || []).filter(Boolean))].map(x => String(x));
 if (!buyNowValidImages.includes(String(selectedImage))) selectedImage = String(product.mainImage || '');
 let maxLimit = Math.min(Number(product.maxOrderLimit || 5), Math.max(0, Number(product.stock) || 0));
@@ -1674,19 +1646,14 @@ let deliveryCharge = product.deliveryCharge || 150;
 let sellerOwnerId = String(product.ownerId || '');
 let siteSetting = (sellerOwnerId ? await SiteSetting.findOne({ ownerId: sellerOwnerId }) : null) || await SiteSetting.findOne() || { bkashNumber: '01700000000',
 nagadNumber: '01800000000' };
-const sellerGuestCodBlocked = isGuestOrder ? await guestCodBlockedForProduct(product) : false;
-const sellerCodBlocked = !isGuestOrder && (!!req.user.isBlocked || sellerBlocksCustomer(req.user,sellerOwnerId));
-const codUnavailable = sellerCodBlocked || sellerGuestCodBlocked;
-let codOptionHTML = codUnavailable ?
-`<p style="color:red; font-size:12px;"><b>Note:</b> ${sellerCodBlocked ? (req.user.isBlocked ? 'আপনার account-এর জন্য COD বন্ধ আছে।' : 'এই Seller আপনার জন্য COD বন্ধ করেছেন। অন্য Seller-এর Product থেকে COD নিতে পারবেন।') : 'এই Seller Guest/Facebook Order-এর জন্য Cash on Delivery বন্ধ করেছেন। অন্য Seller-এর Product থেকে COD নিতে পারবেন।'}</p>` :
+const sellerCodBlocked = !!req.user.isBlocked || sellerBlocksCustomer(req.user,sellerOwnerId);
+let codOptionHTML = sellerCodBlocked ?
+`<p style="color:red; font-size:12px;"><b>Note:</b> ${req.user.isBlocked ? 'আপনার account-এর জন্য COD বন্ধ আছে।' : 'এই Seller আপনার জন্য COD বন্ধ করেছেন। অন্য Seller-এর Product থেকে COD নিতে পারবেন।'}</p>` :
 `<option value="COD">Cash on Delivery</option>`;
-let advanceWarning = codUnavailable ?
-`<div style="background:#fff3cd; padding:10px; border-radius:4px; margin-bottom:10px; color:#856404; font-size:13px;">⚠️<b>Notice:</b> ${sellerCodBlocked ? (req.user.isBlocked ? 'আপনার account-এর জন্য COD বন্ধ আছে।' : 'এই Seller-এর Product-এর জন্য COD বর্তমানে উপলভ্য নয়। অন্য Seller-এর Product-এ COD ব্যবহার করতে পারবেন।') : 'এই Seller Guest/Facebook Order-এর জন্য COD বন্ধ করেছেন। অন্য Seller-এর Product থেকে COD ব্যবহার করতে পারবেন।'}</div>` : '';
+let advanceWarning = sellerCodBlocked ?
+`<div style="background:#fff3cd; padding:10px; border-radius:4px; margin-bottom:10px; color:#856404; font-size:13px;">⚠️<b>Notice:</b> ${req.user.isBlocked ? 'আপনার account-এর জন্য COD বন্ধ আছে।' : 'এই Seller-এর Product-এর জন্য COD বর্তমানে উপলভ্য নয়। অন্য Seller-এর Product-এ COD ব্যবহার করতে পারবেন।'}</div>` : '';
 let totalPriceWithoutDelivery = product.price * qty;
-let guestNotice = isGuestOrder ? `<div style="background:#eef7ff;border:1px solid #cfe8ff;padding:10px;border-radius:7px;margin-bottom:12px;color:#245;font-size:13px;"><b>🛍️ Guest Order:</b> Facebook/Link থেকে আসা Customer চাইলে Email বা Password ছাড়াই অর্ডার করতে পারবেন। শুধু নাম, ফোন ও ঠিকানা দিন।</div>` : '';
-const formName = req.user ? (req.user.name || '') : '';
-const formPhone = req.user ? (req.user.phone || '') : '';
-res.send(` <!DOCTYPE html> <html> <head><title>Checkout</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="max-width:600px; background:white; padding:20px; border-radius:6px;"> <h3 style="margin-top:0;">Checkout Order</h3> ${guestNotice}${advanceWarning} <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;"> <img src="${mediaUrl(selectedImage)}" width="60" height="60" style="object-fit:cover; border-radius:4px; border:1px solid #f85606; cursor:pointer;" onclick="openImageModal(this.src)"> <div> <p style="font-size:14px; margin:0; font-weight:bold;">${product.name}</p> <p style="font-size:14px; margin:4px 0 0 0; color:#f85606;">Price: ৳${product.price} × ${qty} = ৳${totalPriceWithoutDelivery}</p> <p style="font-size:12px; color:#666; margin:2px 0 0 0;">ডেলিভারি চার্জ : ৳${deliveryCharge}</p> </div> </div> <form action="/api/place-order" method="POST" onsubmit="return validateAndPrepareOrder()"> <input type="hidden" name="productId" value="${product._id}"> <input type="hidden" name="productName" value="${product.name}"> <input type="hidden" name="mainImage" value="${selectedImage}"> <input type="hidden" name="price" value="${product.price}"> <input type="hidden" name="quantity" value="${qty}"> <input type="hidden" name="size" value="${v46Esc(selectedSize)}"> <input type="hidden" name="orderSource" value="${v46Esc(orderSource)}"> <input type="hidden" name="deliveryCharge" value="${deliveryCharge}"> <input type="hidden" name="discountPrice" id="discountPriceInput" value="0"> <input type="hidden" name="address" id="fullAddressInput"> <label style="font-size:13px; font-weight:600;">Full Name:</label><br> <input type="text" name="name" value="${v46Esc(formName)}" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600;">Phone Number (বাধ্যতামূলক):</label><br> <input type="text" id="inputPhone" name="phone" value="${v46Esc(formPhone)}" placeholder="যেমন: 017XXXXXXXX" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <!-- জেলা, থানা ও গ্রাম ইনপুট ঘর (বাধ্যতামূলক) --> <div style="background:#fdfdfd; padding:12px; border:1px solid #e0e0e0; border-radius:6px; margin-bottom:10px;"> <label style="font-size:13px; font-weight:600; color:#f85606;">জেলা (District) *:</label><br> <input type="text" id="inputDistrict" placeholder="" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600; color:#f85606;">থানা (Thana / Upazila) *:</label><br> <input type="text" id="inputThana" placeholder="" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600; color:#f85606;">মেইন এড্রেস (গ্রাম / রোড / বাসা নং) *:</label><br> <textarea id="inputVillage" placeholder="" style="width:100%; height:50px; padding:8px; margin:3px 0 5px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea> </div> <label style="font-size:13px; font-weight:600;">Coupon Code:</label><br> <div style="display:flex; gap:5px; margin:4px 0 10px 0;"> <input type="text" name="couponCode" id="couponCodeInput" placeholder="Enter Coupon Code" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;"> <button type="button" onclick="applyCoupon()" class="btn" style="padding:8px 12px; font-size:12px;">Apply</button> </div> <p id="couponMsg" style="font-size:12px; margin:0 0 10px 0; color:green;"></p> <label style="font-size:13px; font-weight:600;">Customer Note:</label><br> <input type="text" name="customerNote" placeholder="" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;"><br> <div style="background:#f0f8ff; padding:12px; border-radius:4px; margin-bottom:12px; font-size:14px; border:1px solid #bce8f1;"> <p style="margin:2px 0;">Product Price: ৳<span id="productPriceText">${totalPriceWithoutDelivery}</span></p> <p style="margin:2px 0;">Delivery Charge: ৳<span id="deliveryChargeText">${deliveryCharge}</span></p> <p style="margin:2px 0; color:red; display:none;" id="discountRow">Discount: -৳<span id="discountText">0</span></p> <hr style="border:0; border-top:1px solid #ccc; margin:6px 0;"> <p style="margin:2px 0; font-weight:bold; color:#f85606; font-size:16px;">Total Payable Amount: ৳<span id="totalAmountText">${totalPriceWithoutDelivery + deliveryCharge}</span></p> </div> <label style="font-size:13px; font-weight:600;">Payment Method:</label><br> <select name="paymentMethod" id="paymentMethod" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" onchange="togglePaymentFields()" required> ${codOptionHTML} <option value="bKash">বিকাশ (বিকাশ পার্সোনাল পেমেন্ট)</option> <option value="Nagad">নগদ (নগদ পার্সোনাল পেমেন্ট)</option> </select><br> <div id="onlinePaymentDiv" style="display:${isGuestOrder ? 'none' : (req.user.isBlocked ? 'block' : 'none')}; background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:10px; border:1px dashed #f85606;"> <p style="font-size:13px; color:#333; margin:0 0 6px 0;">বিকাশ: <b style="color:#f85606;">${siteSetting.bkashNumber}</b> | নগদ: <b style="color:#f85606;">${siteSetting.nagadNumber}</b></p> <label style="font-size:12px; font-weight:600;">আপনার বিকাশ/নগদ নাম্বার:</label><br> <input type="text" name="senderNumber" id="senderNumber" placeholder="যেমন: 01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br> <label style="font-size:12px; font-weight:600;">প্রেরিত টাকার পরিমাণ:</label><br> <input type="number" name="paidAmount" id="paidAmount" placeholder="যেমন: মোট টাকা" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br> <label style="font-size:12px; font-weight:600;">ট্রানজেকশন আইডি (TrxID):</label><br> <input type="text" name="trxId" placeholder="যেমন: 9N7A6..." style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"> </div> <button type="submit" class="btn btn-buy" style="width:100%; padding:12px; font-size:16px; margin-top:5px;">⚡Order Confirm করুন</button> </form> </div> <script> let appliedDiscount = 0; let currentDeliveryCharge = ${deliveryCharge}; function validateAndPrepareOrder() { let phone = document.getElementById('inputPhone').value.trim(); let dist = document.getElementById('inputDistrict').value.trim(); let thana = document.getElementById('inputThana').value.trim(); let village = document.getElementById('inputVillage').value.trim(); if(!phone) { alert('দয়া করে আপনার ফোন নম্বর প্রদান করুন!'); return false; } if(!dist || !thana || !village) { alert('ডেলিভারির জন্য জেলা, থানা এবং সম্পূর্ণ ঠিকানা বাধ্যতামূলক!'); return false; } let fullAddr = "জেলা: " + dist + ", থানা: " + thana + ", ঠিকানা: " + village; document.getElementById('fullAddressInput').value = fullAddr; return true; } async function applyCoupon() { let code = document.getElementById('couponCodeInput').value; let msg = document.getElementById('couponMsg'); if(!code) return; try { let res = await fetch('/api/verify-coupon', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code}) }); let data = await res.json(); if(data.success) { appliedDiscount = data.discountAmount; document.getElementById('discountPriceInput').value = appliedDiscount; document.getElementById('discountText').innerText = appliedDiscount; document.getElementById('discountRow').style.display = 'block'; msg.style.color = 'green'; msg.innerText = 'Coupon applied successfully!'; calculateTotal(); } else { msg.style.color = 'red'; msg.innerText = data.message; } } catch(e) { msg.style.color = 'red'; msg.innerText = 'Invalid coupon request.'; } } function calculateTotal() { let productPrice = Number(document.getElementById('productPriceText').innerText); let total = (productPrice + currentDeliveryCharge) - appliedDiscount; if(total < 0) total = 0; document.getElementById('totalAmountText').innerText = total; } function togglePaymentFields() { let method = document.getElementById('paymentMethod').value; let div = document.getElementById('onlinePaymentDiv'); let senderInput = document.getElementById('senderNumber'); let amountInput = document.getElementById('paidAmount'); if (method === 'bKash' || method === 'Nagad') { div.style.display = 'block'; senderInput.setAttribute('required', 'true'); amountInput.setAttribute('required', 'true'); } else { div.style.display = 'none'; senderInput.removeAttribute('required'); amountInput.removeAttribute('required'); } } </script> </body> </html> `);
+res.send(` <!DOCTYPE html> <html> <head><title>Checkout</title>${globalHeaderHTML}</head> <body> ${getNavbarHTML(req.user)} <div class="container" style="max-width:600px; background:white; padding:20px; border-radius:6px;"> <h3 style="margin-top:0;">Checkout Order</h3> ${advanceWarning} <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;"> <img src="${mediaUrl(selectedImage)}" width="60" height="60" style="object-fit:cover; border-radius:4px; border:1px solid #f85606; cursor:pointer;" onclick="openImageModal(this.src)"> <div> <p style="font-size:14px; margin:0; font-weight:bold;">${product.name}</p> <p style="font-size:14px; margin:4px 0 0 0; color:#f85606;">Price: ৳${product.price} × ${qty} = ৳${totalPriceWithoutDelivery}</p> <p style="font-size:12px; color:#666; margin:2px 0 0 0;">ডেলিভারি চার্জ : ৳${deliveryCharge}</p> </div> </div> <form action="/api/place-order" method="POST" onsubmit="return validateAndPrepareOrder()"> <input type="hidden" name="productId" value="${product._id}"> <input type="hidden" name="productName" value="${product.name}"> <input type="hidden" name="mainImage" value="${selectedImage}"> <input type="hidden" name="price" value="${product.price}"> <input type="hidden" name="quantity" value="${qty}"> <input type="hidden" name="deliveryCharge" value="${deliveryCharge}"> <input type="hidden" name="discountPrice" id="discountPriceInput" value="0"> <input type="hidden" name="address" id="fullAddressInput"> <label style="font-size:13px; font-weight:600;">Full Name:</label><br> <input type="text" name="name" value="${req.user.name || ''}" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600;">Phone Number (বাধ্যতামূলক):</label><br> <input type="text" id="inputPhone" name="phone" value="${req.user.phone || ''}" placeholder="যেমন: 017XXXXXXXX" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <!-- জেলা, থানা ও গ্রাম ইনপুট ঘর (বাধ্যতামূলক) --> <div style="background:#fdfdfd; padding:12px; border:1px solid #e0e0e0; border-radius:6px; margin-bottom:10px;"> <label style="font-size:13px; font-weight:600; color:#f85606;">জেলা (District) *:</label><br> <input type="text" id="inputDistrict" placeholder="" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600; color:#f85606;">থানা (Thana / Upazila) *:</label><br> <input type="text" id="inputThana" placeholder="" style="width:100%; padding:8px; margin:3px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required><br> <label style="font-size:13px; font-weight:600; color:#f85606;">মেইন এড্রেস (গ্রাম / রোড / বাসা নং) *:</label><br> <textarea id="inputVillage" placeholder="" style="width:100%; height:50px; padding:8px; margin:3px 0 5px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" required></textarea> </div> <label style="font-size:13px; font-weight:600;">Coupon Code:</label><br> <div style="display:flex; gap:5px; margin:4px 0 10px 0;"> <input type="text" name="couponCode" id="couponCodeInput" placeholder="Enter Coupon Code" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;"> <button type="button" onclick="applyCoupon()" class="btn" style="padding:8px 12px; font-size:12px;">Apply</button> </div> <p id="couponMsg" style="font-size:12px; margin:0 0 10px 0; color:green;"></p> <label style="font-size:13px; font-weight:600;">Customer Note:</label><br> <input type="text" name="customerNote" placeholder="" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;"><br> <div style="background:#f0f8ff; padding:12px; border-radius:4px; margin-bottom:12px; font-size:14px; border:1px solid #bce8f1;"> <p style="margin:2px 0;">Product Price: ৳<span id="productPriceText">${totalPriceWithoutDelivery}</span></p> <p style="margin:2px 0;">Delivery Charge: ৳<span id="deliveryChargeText">${deliveryCharge}</span></p> <p style="margin:2px 0; color:red; display:none;" id="discountRow">Discount: -৳<span id="discountText">0</span></p> <hr style="border:0; border-top:1px solid #ccc; margin:6px 0;"> <p style="margin:2px 0; font-weight:bold; color:#f85606; font-size:16px;">Total Payable Amount: ৳<span id="totalAmountText">${totalPriceWithoutDelivery + deliveryCharge}</span></p> </div> <label style="font-size:13px; font-weight:600;">Payment Method:</label><br> <select name="paymentMethod" id="paymentMethod" style="width:100%; padding:10px; margin:4px 0 10px 0; border:1px solid #ccc; border-radius:4px; font-size:14px;" onchange="togglePaymentFields()" required> ${codOptionHTML} <option value="bKash">বিকাশ (বিকাশ পার্সোনাল পেমেন্ট)</option> <option value="Nagad">নগদ (নগদ পার্সোনাল পেমেন্ট)</option> </select><br> <div id="onlinePaymentDiv" style="display:${req.user.isBlocked ? 'block' : 'none'}; background:#f9f9f9; padding:12px; border-radius:4px; margin-bottom:10px; border:1px dashed #f85606;"> <p style="font-size:13px; color:#333; margin:0 0 6px 0;">বিকাশ: <b style="color:#f85606;">${siteSetting.bkashNumber}</b> | নগদ: <b style="color:#f85606;">${siteSetting.nagadNumber}</b></p> <label style="font-size:12px; font-weight:600;">আপনার বিকাশ/নগদ নাম্বার:</label><br> <input type="text" name="senderNumber" id="senderNumber" placeholder="যেমন: 01XXXXXXXXX" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br> <label style="font-size:12px; font-weight:600;">প্রেরিত টাকার পরিমাণ:</label><br> <input type="number" name="paidAmount" id="paidAmount" placeholder="যেমন: মোট টাকা" style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"><br> <label style="font-size:12px; font-weight:600;">ট্রানজেকশন আইডি (TrxID):</label><br> <input type="text" name="trxId" placeholder="যেমন: 9N7A6..." style="width:100%; padding:8px; margin:3px 0 8px 0; border:1px solid #ccc; border-radius:4px; font-size:13px;"> </div> <button type="submit" class="btn btn-buy" style="width:100%; padding:12px; font-size:16px; margin-top:5px;">⚡Order Confirm করুন</button> </form> </div> <script> let appliedDiscount = 0; let currentDeliveryCharge = ${deliveryCharge}; function validateAndPrepareOrder() { let phone = document.getElementById('inputPhone').value.trim(); let dist = document.getElementById('inputDistrict').value.trim(); let thana = document.getElementById('inputThana').value.trim(); let village = document.getElementById('inputVillage').value.trim(); if(!phone) { alert('দয়া করে আপনার ফোন নম্বর প্রদান করুন!'); return false; } if(!dist || !thana || !village) { alert('ডেলিভারির জন্য জেলা, থানা এবং সম্পূর্ণ ঠিকানা বাধ্যতামূলক!'); return false; } let fullAddr = "জেলা: " + dist + ", থানা: " + thana + ", ঠিকানা: " + village; document.getElementById('fullAddressInput').value = fullAddr; return true; } async function applyCoupon() { let code = document.getElementById('couponCodeInput').value; let msg = document.getElementById('couponMsg'); if(!code) return; try { let res = await fetch('/api/verify-coupon', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code}) }); let data = await res.json(); if(data.success) { appliedDiscount = data.discountAmount; document.getElementById('discountPriceInput').value = appliedDiscount; document.getElementById('discountText').innerText = appliedDiscount; document.getElementById('discountRow').style.display = 'block'; msg.style.color = 'green'; msg.innerText = 'Coupon applied successfully!'; calculateTotal(); } else { msg.style.color = 'red'; msg.innerText = data.message; } } catch(e) { msg.style.color = 'red'; msg.innerText = 'Invalid coupon request.'; } } function calculateTotal() { let productPrice = Number(document.getElementById('productPriceText').innerText); let total = (productPrice + currentDeliveryCharge) - appliedDiscount; if(total < 0) total = 0; document.getElementById('totalAmountText').innerText = total; } function togglePaymentFields() { let method = document.getElementById('paymentMethod').value; let div = document.getElementById('onlinePaymentDiv'); let senderInput = document.getElementById('senderNumber'); let amountInput = document.getElementById('paidAmount'); if (method === 'bKash' || method === 'Nagad') { div.style.display = 'block'; senderInput.setAttribute('required', 'true'); amountInput.setAttribute('required', 'true'); } else { div.style.display = 'none'; senderInput.removeAttribute('required'); amountInput.removeAttribute('required'); } } </script> </body> </html> `);
 } catch (err) {
 next(err);
 }
@@ -1706,15 +1673,14 @@ next(err);
 });
 app.post('/api/place-order', async (req, res, next) => {
 try {
-const { productId, productName, mainImage, price, quantity, name, phone, address, size, orderSource,
+if (!req.user) return res.redirect('/login');
+const { productId, productName, mainImage, price, quantity, name, phone, address,
 discountPrice, customerNote, paymentMethod, senderNumber, paidAmount, trxId,
 deliveryCharge } = req.body;
-const isGuestOrder = !req.user;
-const guestUserEmail = isGuestOrder ? `guest_${Date.now()}_${Math.random().toString(36).slice(2,10)}@guest.local` : req.user.email;
 if(!phone || !address) {
 return res.send(`<script>alert('ফোন নম্বর এবং ঠিকানা বাধ্যতামূলক!'); window.history.back();</script>`);
 }
-if (req.user && req.user.isBlocked && paymentMethod === 'COD') {
+if (req.user.isBlocked && paymentMethod === 'COD') {
 return res.send(`<script>alert('COD is disabled.'); window.history.back();</script>`);
 }
 if ((paymentMethod === 'bKash' || paymentMethod === 'Nagad') && (!senderNumber ||
@@ -1725,8 +1691,7 @@ let qty = Math.floor(Number(quantity) || 1);
 if (qty < 1) qty = 1;
 let productRecord = await Product.findById(productId);
 if (!productRecord) return res.send(`<script>alert('Product not found!'); window.history.back();</script>`);
-if(paymentMethod==='COD' && req.user && sellerBlocksCustomer(req.user,String(productRecord.ownerId||''))) return res.send(`<script>alert('এই Seller আপনার জন্য Cash on Delivery বন্ধ করেছেন। অন্য Seller-এর Product থেকে COD নিতে পারবেন।'); window.history.back();</script>`);
-if(paymentMethod==='COD' && isGuestOrder && await guestCodBlockedForProduct(productRecord)) return res.send(`<script>alert('এই Seller Guest/Facebook Order-এর জন্য Cash on Delivery বন্ধ করেছেন। অন্য Seller-এর Product থেকে COD নিতে পারবেন।'); window.history.back();</script>`);
+if(paymentMethod==='COD' && sellerBlocksCustomer(req.user,String(productRecord.ownerId||''))) return res.send(`<script>alert('এই Seller আপনার জন্য Cash on Delivery বন্ধ করেছেন। অন্য Seller-এর Product থেকে COD নিতে পারবেন।'); window.history.back();</script>`);
 let maxLimit = Math.min(Number(productRecord.maxOrderLimit || 5), Math.max(0, Number(productRecord.stock) || 0));
 if (qty > maxLimit) return res.send(`<script>alert('এই পণ্যের সর্বোচ্চ ক্রয়ের সীমা/স্টক অনুযায়ী ${maxLimit} টি পর্যন্ত অর্ডার করা যাবে।'); window.history.back();</script>`);
 const validImages = [productRecord.mainImage, ...((productRecord.additionalImages || []).filter(Boolean))].map(x => String(x));
@@ -1737,7 +1702,7 @@ const productPrice = unitPrice * qty;
 let discount = Math.max(0, Number(discountPrice) || 0);
 if (discount > productPrice + dCharge) discount = productPrice + dCharge;
 let totalAmount = (productPrice + dCharge) - discount;
-if (req.user) await User.findByIdAndUpdate(req.user._id, { name, phone, address });
+await User.findByIdAndUpdate(req.user._id, { name, phone, address });
 const stockUpdate = await Product.updateOne({ _id: productId, stock: { $gte: qty } }, { $inc: { stock: -qty, soldCount: qty } });
 if (!stockUpdate || stockUpdate.modifiedCount !== 1) {
   return res.send(`<script>alert('স্টক পরিবর্তন হয়েছে। আবার চেষ্টা করুন।'); window.location.href='/product/${productId}';</script>`);
@@ -1748,12 +1713,11 @@ productName: productRecord.name,
 mainImage: safeMainImage,
 price: unitPrice,
 quantity: qty,
-size: safeText(size || '', 80),
 ownerId: String(productRecord.ownerId || '')
 };
 try {
   const savedOrder = await new Order({
-  userEmail: guestUserEmail,
+  userEmail: req.user.email,
   userName: name || '',
   userPhone: phone || '',
   userAddress: address || '',
@@ -1770,16 +1734,14 @@ try {
   paidAmount: Number(paidAmount) || 0,
   trxId: trxId || '',
   status: 'Pending',
-  previousStatus: 'Pending',
-  isGuestOrder,
-  orderSource: safeText(orderSource || (isGuestOrder ? 'guest-buy-now' : 'web'), 40)
+  previousStatus: 'Pending'
   }).save();
   await createOrderOwnerNotifications(savedOrder);
 } catch (saveErr) {
   await Product.updateOne({ _id: productId }, { $inc: { stock: qty, soldCount: -qty } });
   throw saveErr;
 }
-res.send(`<script>alert(${JSON.stringify(isGuestOrder ? 'Order placed successfully! আপনার Guest Order গ্রহণ করা হয়েছে।' : 'Order placed successfully!')}); window.location.href='${isGuestOrder ? '/' : '/my-orders'}';</script>`);
+res.send(`<script>alert('Order placed successfully!'); window.location.href='/my-orders';</script>`);
 } catch (err) {
 next(err);
 }
@@ -2151,28 +2113,42 @@ app.get('/staff-manifest.webmanifest', async (req,res,next)=>{
   }catch(e){next(e);}
 });
 
-app.post('/admin/toggle-guest-cod', async (req,res,next)=>{
-  try {
-    if (!req.user || !(isMainAdmin(req.user) || (isSubAdmin(req.user) && subAdminIsActive(req.user)))) return res.status(403).send('Admin/Seller Admin access required');
-    const enabled = String(req.body.enabled || '') === '1';
-    await User.findByIdAndUpdate(req.user._id,{guestCodDisabled:enabled});
-    res.redirect('/admin-dashboard');
-  } catch(e){ next(e); }
-});
+// ================= Store Profile + Shareable Store Link =================
+function publicSiteBaseUrl(req) {
+  const configured = String(process.env.SITE_URL || '').trim().replace(/\/$/, '');
+  if (configured) return configured;
+  const host = String(req.get('host') || '').trim();
+  if (host) return `https://${host}`;
+  return String(SITE_URL_FALLBACK || '').replace(/\/$/, '');
+}
 
-app.post('/sub-admin/shop-logo', upload.single('shopLogo'), async (req,res,next)=>{
+app.post('/admin/store-profile', upload.single('storeLogo'), async (req, res, next) => {
   try {
-    if (!req.user || !(isMainAdmin(req.user) || (isSubAdmin(req.user) && subAdminIsActive(req.user)))) return res.status(403).send('Admin/Seller Admin access required');
-    if (!req.file) return res.send(`<script>alert('দোকানের Logo/ছবি নির্বাচন করুন।');window.history.back();</script>`);
-    let logoUrl = await uploadBufferToCloudinary(req.file,'oneline-shop/store-logos');
-    if (!logoUrl) {
-      const safeName = `${Date.now()}-store-logo-${String(req.file.originalname||'logo').replace(/[^a-zA-Z0-9._-]/g,'_')}`;
-      fs.writeFileSync(path.join(uploadDir,safeName),req.file.buffer);
-      logoUrl = safeName;
+    if (!req.user || !(isMainAdmin(req.user) || (isSubAdmin(req.user) && subAdminIsActive(req.user)))) {
+      return res.status(403).send('Only Main Admin or active Seller Admin can update Store Profile.');
     }
-    await User.findByIdAndUpdate(req.user._id,{subAdminShopLogo:logoUrl});
-    res.send(`<script>alert('দোকানের Logo/ছবি সফলভাবে Save হয়েছে।');window.location.href='/admin-dashboard';</script>`);
-  } catch(e){next(e);}
+    if (!dbReady()) return res.status(503).send(`<script>alert('Database সংযোগ পাওয়া যাচ্ছে না।');window.history.back();</script>`);
+
+    const shopName = safeText(req.body.shopName, 160);
+    const update = { subAdminShopName: shopName || (isMainAdmin(req.user) ? 'Main Admin Store' : (req.user.subAdminShopName || req.user.name || 'Seller Store')) };
+
+    if (req.file) {
+      if (!String(req.file.mimetype || '').toLowerCase().startsWith('image/')) {
+        return res.status(400).send(`<script>alert('শুধু Image Logo আপলোড করুন।');window.history.back();</script>`);
+      }
+      if (Number(req.file.size || 0) > 5 * 1024 * 1024) {
+        return res.status(400).send(`<script>alert('Logo সর্বোচ্চ 5MB হতে পারবে।');window.history.back();</script>`);
+      }
+      const logoUrl = await uploadBufferToCloudinary(req.file, 'oneline-shop/store-logos');
+      if (!logoUrl) return res.status(500).send(`<script>alert('Logo upload করা যায়নি। Cloudinary settings/check করুন।');window.history.back();</script>`);
+      update.subAdminShopLogo = logoUrl;
+    }
+
+    await User.findByIdAndUpdate(req.user._id, { $set: update }, { runValidators: true });
+    res.redirect('/admin-dashboard#storeProfileBox');
+  } catch (err) {
+    next(err);
+  }
 });
 
 app.get('/admin-dashboard', async (req, res, next) => {
@@ -2286,9 +2262,7 @@ const tiktokSectionHTML = `<details class="admin-section-box" id="tiktokBox" dat
 `<div style="background:#fff;padding:14px;border:1px solid #eee;border-radius:12px;margin-top:14px;"><h4 style="margin-top:0">🚀 Publish to TikTok</h4><form action="/admin/tiktok/publish" method="POST" enctype="multipart/form-data" style="display:grid;gap:8px;"><label>Media Type</label><select name="mediaType" required><option value="video">🎬 Video</option><option value="photo">🖼️ Photo</option></select><label>Caption / Title</label><textarea name="caption" maxlength="2200" placeholder="Caption / hashtags লিখুন..." style="min-height:80px"></textarea><label>Photo Title (photo post হলে)</label><input name="title" maxlength="90" placeholder="Photo title"><label>Privacy</label><select name="privacyLevel"><option value="PUBLIC_TO_EVERYONE">Public</option><option value="MUTUAL_FOLLOW_FRIENDS">Friends</option><option value="FOLLOWER_OF_CREATOR">Followers</option><option value="SELF_ONLY">Only me</option></select><label>Product (ঐচ্ছিক)</label><select name="productId"><option value="">No product</option>${tiktokProductOptions}</select><small style="color:#777">Product নির্বাচন করলে caption-এ আপনার website-এর product URL যুক্ত হবে।</small><label>Video / Photo File</label><input type="file" name="mediaFile" accept="image/*,video/*" required><button class="btn" style="background:#111;color:#fff;padding:9px 14px">🚀 Publish Directly to TikTok</button></form></div>`+
 `<div style="margin-top:12px;background:#f8f9fa;border:1px solid #ddd;border-radius:8px;padding:10px;font-size:12px;color:#555"><b>Order Now:</b> TikTok-এর সাধারণ Content Posting API দিয়ে Facebook-এর মতো custom “Order Now” button/CTA সরাসরি পোস্টের মধ্যে বসানোর নিশ্চয়তা নেই। Product URL caption-এ দেওয়া হবে। Native TikTok Shop product button চাইলে আলাদা TikTok Shop commerce integration ও approval লাগবে।</div></div></details>`;
 
-const sellerShopLogoBox = (isMainAdmin(req.user) || isSubAdmin(req.user)) ? `<div style="background:#f8fbff;border:1px solid #cfe8ff;border-radius:10px;padding:12px;margin:10px 0 14px 0;"><b>🏪 আপনার দোকানের Logo / ছবি</b><p style="font-size:12px;color:#666;margin:6px 0 9px 0;">Customer আপনার Product Details ও Visit Store-এ এই ছবি/Logo দেখতে পাবে।</p>${req.user.subAdminShopLogo ? `<div style="margin-bottom:8px;"><img src="${mediaUrl(req.user.subAdminShopLogo)}" style="width:72px;height:72px;object-fit:cover;border-radius:50%;border:2px solid #f85606;" onerror="this.style.display='none'"></div>` : '<div style="font-size:12px;color:#777;margin-bottom:8px;">এখনো কোনো দোকানের Logo/ছবি সেট করা হয়নি।</div>'}<form action="/sub-admin/shop-logo" method="POST" enctype="multipart/form-data" style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;"><input type="file" name="shopLogo" accept="image/*" required><button class="btn" type="submit" style="padding:7px 12px;background:#f85606;">💾 Logo Save</button></form></div>` : '';
-const guestCodControlBox = (isMainAdmin(req.user) || isSubAdmin(req.user)) ? `<div style="background:${req.user.guestCodDisabled ? '#fff3cd' : '#e8f5e9'};border:1px solid ${req.user.guestCodDisabled ? '#ffe08a' : '#b7dfb9'};border-radius:10px;padding:12px;margin:10px 0 14px 0;"><b>🛍️ Facebook / Guest Order — Cash on Delivery</b><p style="font-size:12px;color:#555;margin:6px 0 9px 0;">এই সেটিংটি শুধু আপনার নিজের Product-এর Guest/Facebook Order-এর COD নিয়ন্ত্রণ করবে। অন্য Seller-এর Product-এর COD এতে বন্ধ হবে না।</p><div style="font-size:13px;margin-bottom:8px;"><b>বর্তমান অবস্থা:</b> <span style="color:${req.user.guestCodDisabled ? '#c0392b' : '#198754'};font-weight:700;">${req.user.guestCodDisabled ? 'বন্ধ' : 'চালু'}</span></div><form action="/admin/toggle-guest-cod" method="POST" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><input type="hidden" name="enabled" value="${req.user.guestCodDisabled ? '0' : '1'}"><button class="btn" type="submit" style="padding:8px 12px;background:${req.user.guestCodDisabled ? '#28a745' : '#dc3545'};">${req.user.guestCodDisabled ? '✅ Guest COD চালু করুন' : '🚫 Guest COD বন্ধ করুন'}</button></form></div>` : '';
-res.send(` <!DOCTYPE html> <html> <head><title>Admin Dashboard</title>${globalHeaderHTML}</head> <body class="${isEmployee(req.user) ? 'staff-restricted-dashboard' : ''}"> ${isEmployee(req.user) ? '' : getNavbarHTML(req.user)} <div class="container" style="background:white; padding:20px; border-radius:6px;"> <h2 style="margin-top:0; color:#f85606;">⚙️Admin Control Panel</h2>${isEmployee(req.user) ? `<div class="staff-only-title"><b>👷 Employee Work Area</b><br>আপনার জন্য নির্ধারিত section ছাড়া অন্য কোনো Admin/Shop section ব্যবহার করা যাবে না। Assigned: ${(req.user.staffAssignedSections||[]).join(', ')}</div>` : ''}${isMainAdmin(req.user) ? `<div style="background:#e8f5e9;border:1px solid #b7dfb9;padding:8px;border-radius:8px;margin:8px 0;font-size:12px;">🔐 Main Admin verified: ${req.user.email}</div>` : ''}${isSubAdmin(req.user) ? `<div style="background:#fff3cd;padding:10px;border-radius:6px;margin-bottom:12px;"><b>Seller Admin:</b> ${req.user.subAdminShopName || req.user.name || req.user.email} | Status: ${req.user.subAdminStatus} | ${req.user.unlimitedFree ? 'Unlimited Free' : (req.user.activationExpiresAt ? 'Expiry: '+new Date(req.user.activationExpiresAt).toLocaleDateString() : 'Expiry not set')} ${req.user.subAdminWarning ? `<br><span style="color:#b94a48;"><b>Notice:</b> ${req.user.subAdminWarning}</span>` : ''}</div>` : ''}${sellerShopLogoBox}${guestCodControlBox}${isSubAdmin(req.user) ? `<details class="admin-section-box" id="mainAdminHelpBox" data-section-key="help"><summary>🆘 Main Admin Help / Support</summary><div class="admin-section-body"><h4 style="margin:14px 0 8px 0;">Main Admin Help / Support</h4><form action="/sub-admin/support" method="POST"><textarea name="message" required placeholder="Main Admin-এর কাছে সাহায্যের কথা লিখুন..." style="width:100%;height:60px;padding:8px;border:1px solid #ccc;border-radius:5px;"></textarea><label style="display:block;font-size:12px;font-weight:600;margin-top:8px;">WhatsApp নম্বর হারিয়ে গেলে নতুন WhatsApp নম্বর দিন (ঐচ্ছিক)</label><input type="text" name="requestedWhatsApp" placeholder="017XXXXXXXX অথবা https://wa.me/..." style="width:100%;padding:8px;border:1px solid #ccc;border-radius:5px;"><small style="display:block;color:#777;margin-top:5px;">নতুন নম্বর দিলে Main Admin যাচাই করে account-এর WhatsApp নম্বর পরিবর্তন করতে পারবেন।</small><button class="btn" style="margin-top:6px;padding:7px 12px;">Send Help Request</button></form></div><div style="margin-top:12px;background:#f8fbff;border:1px solid #cfe8ff;border-radius:10px;padding:10px;"><h4 style="margin:0 0 8px 0;">💬 Main Admin Messages</h4><div style="max-height:300px;overflow-y:auto;">${currentSubAdminControlMessages.length?currentSubAdminControlMessages.map(m=>`<div style="padding:8px;margin:6px 0;border-radius:8px;background:${normalizeEmail(m.senderEmail)===normalizeEmail(req.user.email)?'#fff1e8':'#eef7ff'};border:1px solid #e7edf4;"><div style="font-size:11px;color:#777;">${m.senderRole==='staff'?'Employee':m.senderRole==='subadmin'?'You':'Main Admin'} • ${m.senderEmail} • ${new Date(m.createdAt).toLocaleString()}</div><div style="font-size:13px;white-space:pre-wrap;margin-top:3px;">${v46Esc(m.message)}</div></div>`).join(''):'<div style="color:#777;font-size:12px;">এখনও কোনো Main Admin message নেই।</div>'}</div>${currentSubAdminControlMessages.length?`<form action="/sub-admin/reply-control-message" method="POST" style="display:flex;gap:5px;margin-top:8px;"><input type="text" name="message" required maxlength="2000" placeholder="এখানেই reply লিখুন..." style="flex:1;padding:8px;border:1px solid #ccc;border-radius:7px;"><button class="btn" style="padding:7px 11px;background:#007bff;">Reply</button></form>`:''}</div></div></details>` : ''} ${(isMainAdmin(req.user)||isSubAdmin(req.user)) ? `<details class="admin-section-box" id="staffBox" data-section-key="employeeManagement"><summary>👷 Employee Management</summary><div class="admin-section-body"><h3>👷 Employee / Staff Section Control</h3><p style="font-size:12px;color:#666">আপনার নিয়ন্ত্রণাধীন section-এর কাজ একজন employee-কে দিন। Employee শুধু assigned section-ই দেখতে ও ব্যবহার করতে পারবে।</p><div style="background:#eef7ff;border:1px solid #cfe8ff;border-radius:8px;padding:9px;font-size:12px;margin:8px 0;"><b>🤝 Assistant Employee Control:</b> এই Employee/Assistant list যার অধীনে তৈরি হবে, তার নিজের control-এই থাকবে। Sub Admin-এর Assistant Employee-কে Main Admin এই panel থেকে edit/permission দিতে পারবে না; Sub Admin নিজেই তার Assistant তৈরি, password reset এবং section access manage করবে।</div><form action="/admin/staff/create" method="POST" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:10px;display:grid;gap:7px;"><input name="name" placeholder="Employee Name" required><input name="email" type="email" placeholder="Employee Email" required><input name="password" type="password" minlength="6" placeholder="Temporary Password" required><label style="font-size:12px;font-weight:700">Assign Section(s)</label><div class="admin-permission-list">${(isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[])).map(k=>`<label><input type="checkbox" name="sections" value="${k}"> ${adminSectionLabel(k)}</label>`).join('')}</div><button class="btn" style="background:#28a745">➕ Create Employee Account</button></form><div style="margin-top:12px"><b style="font-size:13px">🤝 Your Assistant Employees</b>${(await User.find({role:'staff',staffParentAdminId:String(req.user._id)}).sort({_id:-1}).lean()).map(st=>`<details style="margin-top:7px;border:1px solid #ddd;border-radius:8px;padding:7px"><summary>${st.name||st.email} — ${st.email}</summary><div style="font-size:12px;color:#666;margin:6px 0">Assigned: ${(st.staffAssignedSections||[]).join(', ')||'None'}</div><form action="/admin/staff/permissions/${st._id}" method="POST" style="background:#f8fafc;padding:7px;border-radius:7px"><div class="admin-permission-list">${(isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[])).map(k=>`<label><input type="checkbox" name="sections" value="${k}" ${(st.staffAssignedSections||[]).includes(k) || (k==='customerManagement' && (st.staffAssignedSections||[]).includes('users'))?'checked':''}> ${adminSectionLabel(k)}</label>`).join('')}</div><button class="btn" style="margin-top:6px;padding:5px 9px">💾 Save Employee Access</button></form><form action="/admin/staff/reset-password/${st._id}" method="POST" style="margin-top:7px;background:#fff8e1;padding:7px;border-radius:7px;display:flex;gap:6px;flex-wrap:wrap;" onsubmit="return confirm('এই Employee-এর Website login password reset করবেন?')"><input type="password" name="newPassword" minlength="6" placeholder="New Website Password" required style="flex:1;min-width:180px;padding:7px;border:1px solid #ddd;border-radius:6px;"><button class="btn" type="submit" style="padding:5px 9px;background:#6f42c1">🔑 Reset Login Password</button></form></details>`).join('')||'<div style="color:#777;font-size:12px;margin-top:6px">কোনো employee নেই।</div>'}</div></div></details><hr style="margin:20px 0;">` : ''}<hr style="margin:20px 0;"> <style>
+res.send(` <!DOCTYPE html> <html> <head><title>Admin Dashboard</title>${globalHeaderHTML}</head> <body class="${isEmployee(req.user) ? 'staff-restricted-dashboard' : ''}"> ${isEmployee(req.user) ? '' : getNavbarHTML(req.user)} <div class="container" style="background:white; padding:20px; border-radius:6px;"> <h2 style="margin-top:0; color:#f85606;">⚙️Admin Control Panel</h2>${(isMainAdmin(req.user)||isSubAdmin(req.user)) ? (() => { const storeId = isMainAdmin(req.user) ? 'main-admin' : String(req.user._id); const storeUrl = `${publicSiteBaseUrl(req)}/store/${encodeURIComponent(storeId)}`; const currentShopName = req.user.subAdminShopName || (isMainAdmin(req.user) ? 'Main Admin Store' : (req.user.name || req.user.email || 'Seller Store')); const currentLogo = req.user.subAdminShopLogo || ''; return `<details class="admin-section-box" id="storeProfileBox" data-section-key="storeProfile" open style="margin:0 0 14px 0;"><summary>🏪 Store Profile & Share Link</summary><div class="admin-section-body"><div style="background:linear-gradient(135deg,#fff7f0,#fff);border:1px solid #ffd7c2;border-radius:12px;padding:12px;"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><div style="flex:0 0 auto;">${currentLogo ? `<img src="${mediaUrl(currentLogo)}" alt="Store Logo" style="width:68px;height:68px;object-fit:cover;border-radius:50%;border:2px solid #f85606;background:#fff;">` : `<div style="width:68px;height:68px;border-radius:50%;border:2px dashed #f85606;background:#fff7f2;display:flex;align-items:center;justify-content:center;font-size:30px;">🏪</div>`}</div><div style="flex:1;min-width:220px;"><b style="font-size:15px;">${v46Esc(currentShopName)}</b><div style="font-size:12px;color:#666;margin-top:3px;">আপনার দোকানের Logo/নাম এবং Facebook-এ শেয়ার করার Store Link এখান থেকে সেট করুন।</div></div></div><form action="/admin/store-profile" method="POST" enctype="multipart/form-data" style="margin-top:12px;display:flex;gap:7px;align-items:end;flex-wrap:wrap;"><label style="font-size:11px;font-weight:700;flex:1;min-width:180px;">Store Name<br><input type="text" name="shopName" value="${v46Esc(currentShopName)}" maxlength="160" placeholder="দোকানের নাম" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;"></label><label style="font-size:11px;font-weight:700;min-width:180px;">Store Logo<br><input type="file" name="storeLogo" accept="image/*" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:6px;background:#fff;"></label><button class="btn" type="submit" style="padding:9px 14px;background:#28a745;white-space:nowrap;">💾 Save</button></form><div style="margin-top:10px;padding:9px;background:#fff;border:1px solid #e4e7eb;border-radius:8px;"><div style="font-size:12px;font-weight:700;margin-bottom:5px;">🔗 আপনার Store Link</div><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><input id="storeLink-${storeId}" type="text" value="${v46Esc(storeUrl)}" readonly onclick="this.select()" style="flex:1;min-width:220px;padding:8px;border:1px solid #ccc;border-radius:6px;background:#f8f9fa;font-size:12px;"><button type="button" class="btn" style="padding:8px 12px;background:#007bff;white-space:nowrap;" onclick="copyStoreLink('${storeId}', this)">📋 Copy Link</button><a href="/store/${encodeURIComponent(storeId)}" target="_blank" rel="noopener noreferrer" class="btn" style="padding:8px 12px;background:#f85606;white-space:nowrap;">🏪 Open Store</a></div><div style="font-size:11px;color:#666;margin-top:5px;">এই Link Facebook পোস্ট, Reel, WhatsApp বা অন্য জায়গায় দিলে Customer সরাসরি আপনার দোকানের Store Page-এ যাবে।</div></div></div></div></details>`; })() : ''}${isEmployee(req.user) ? `<div class="staff-only-title"><b>👷 Employee Work Area</b><br>আপনার জন্য নির্ধারিত section ছাড়া অন্য কোনো Admin/Shop section ব্যবহার করা যাবে না। Assigned: ${(req.user.staffAssignedSections||[]).join(', ')}</div>` : ''}${isMainAdmin(req.user) ? `<div style="background:#e8f5e9;border:1px solid #b7dfb9;padding:8px;border-radius:8px;margin:8px 0;font-size:12px;">🔐 Main Admin verified: ${req.user.email}</div>` : ''}${isSubAdmin(req.user) ? `<div style="background:#fff3cd;padding:10px;border-radius:6px;margin-bottom:12px;"><b>Seller Admin:</b> ${req.user.subAdminShopName || req.user.name || req.user.email} | Status: ${req.user.subAdminStatus} | ${req.user.unlimitedFree ? 'Unlimited Free' : (req.user.activationExpiresAt ? 'Expiry: '+new Date(req.user.activationExpiresAt).toLocaleDateString() : 'Expiry not set')} ${req.user.subAdminWarning ? `<br><span style="color:#b94a48;"><b>Notice:</b> ${req.user.subAdminWarning}</span>` : ''}</div>` : ''}${isSubAdmin(req.user) ? `<details class="admin-section-box" id="mainAdminHelpBox" data-section-key="help"><summary>🆘 Main Admin Help / Support</summary><div class="admin-section-body"><h4 style="margin:14px 0 8px 0;">Main Admin Help / Support</h4><form action="/sub-admin/support" method="POST"><textarea name="message" required placeholder="Main Admin-এর কাছে সাহায্যের কথা লিখুন..." style="width:100%;height:60px;padding:8px;border:1px solid #ccc;border-radius:5px;"></textarea><label style="display:block;font-size:12px;font-weight:600;margin-top:8px;">WhatsApp নম্বর হারিয়ে গেলে নতুন WhatsApp নম্বর দিন (ঐচ্ছিক)</label><input type="text" name="requestedWhatsApp" placeholder="017XXXXXXXX অথবা https://wa.me/..." style="width:100%;padding:8px;border:1px solid #ccc;border-radius:5px;"><small style="display:block;color:#777;margin-top:5px;">নতুন নম্বর দিলে Main Admin যাচাই করে account-এর WhatsApp নম্বর পরিবর্তন করতে পারবেন।</small><button class="btn" style="margin-top:6px;padding:7px 12px;">Send Help Request</button></form></div><div style="margin-top:12px;background:#f8fbff;border:1px solid #cfe8ff;border-radius:10px;padding:10px;"><h4 style="margin:0 0 8px 0;">💬 Main Admin Messages</h4><div style="max-height:300px;overflow-y:auto;">${currentSubAdminControlMessages.length?currentSubAdminControlMessages.map(m=>`<div style="padding:8px;margin:6px 0;border-radius:8px;background:${normalizeEmail(m.senderEmail)===normalizeEmail(req.user.email)?'#fff1e8':'#eef7ff'};border:1px solid #e7edf4;"><div style="font-size:11px;color:#777;">${m.senderRole==='staff'?'Employee':m.senderRole==='subadmin'?'You':'Main Admin'} • ${m.senderEmail} • ${new Date(m.createdAt).toLocaleString()}</div><div style="font-size:13px;white-space:pre-wrap;margin-top:3px;">${v46Esc(m.message)}</div></div>`).join(''):'<div style="color:#777;font-size:12px;">এখনও কোনো Main Admin message নেই।</div>'}</div>${currentSubAdminControlMessages.length?`<form action="/sub-admin/reply-control-message" method="POST" style="display:flex;gap:5px;margin-top:8px;"><input type="text" name="message" required maxlength="2000" placeholder="এখানেই reply লিখুন..." style="flex:1;padding:8px;border:1px solid #ccc;border-radius:7px;"><button class="btn" style="padding:7px 11px;background:#007bff;">Reply</button></form>`:''}</div></div></details>` : ''} ${(isMainAdmin(req.user)||isSubAdmin(req.user)) ? `<details class="admin-section-box" id="staffBox" data-section-key="employeeManagement"><summary>👷 Employee Management</summary><div class="admin-section-body"><h3>👷 Employee / Staff Section Control</h3><p style="font-size:12px;color:#666">আপনার নিয়ন্ত্রণাধীন section-এর কাজ একজন employee-কে দিন। Employee শুধু assigned section-ই দেখতে ও ব্যবহার করতে পারবে।</p><div style="background:#eef7ff;border:1px solid #cfe8ff;border-radius:8px;padding:9px;font-size:12px;margin:8px 0;"><b>🤝 Assistant Employee Control:</b> এই Employee/Assistant list যার অধীনে তৈরি হবে, তার নিজের control-এই থাকবে। Sub Admin-এর Assistant Employee-কে Main Admin এই panel থেকে edit/permission দিতে পারবে না; Sub Admin নিজেই তার Assistant তৈরি, password reset এবং section access manage করবে।</div><form action="/admin/staff/create" method="POST" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:10px;display:grid;gap:7px;"><input name="name" placeholder="Employee Name" required><input name="email" type="email" placeholder="Employee Email" required><input name="password" type="password" minlength="6" placeholder="Temporary Password" required><label style="font-size:12px;font-weight:700">Assign Section(s)</label><div class="admin-permission-list">${(isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[])).map(k=>`<label><input type="checkbox" name="sections" value="${k}"> ${adminSectionLabel(k)}</label>`).join('')}</div><button class="btn" style="background:#28a745">➕ Create Employee Account</button></form><div style="margin-top:12px"><b style="font-size:13px">🤝 Your Assistant Employees</b>${(await User.find({role:'staff',staffParentAdminId:String(req.user._id)}).sort({_id:-1}).lean()).map(st=>`<details style="margin-top:7px;border:1px solid #ddd;border-radius:8px;padding:7px"><summary>${st.name||st.email} — ${st.email}</summary><div style="font-size:12px;color:#666;margin:6px 0">Assigned: ${(st.staffAssignedSections||[]).join(', ')||'None'}</div><form action="/admin/staff/permissions/${st._id}" method="POST" style="background:#f8fafc;padding:7px;border-radius:7px"><div class="admin-permission-list">${(isMainAdmin(req.user)?ADMIN_SECTION_KEYS:(Array.isArray(req.user.adminSections)?req.user.adminSections:[])).map(k=>`<label><input type="checkbox" name="sections" value="${k}" ${(st.staffAssignedSections||[]).includes(k) || (k==='customerManagement' && (st.staffAssignedSections||[]).includes('users'))?'checked':''}> ${adminSectionLabel(k)}</label>`).join('')}</div><button class="btn" style="margin-top:6px;padding:5px 9px">💾 Save Employee Access</button></form><form action="/admin/staff/reset-password/${st._id}" method="POST" style="margin-top:7px;background:#fff8e1;padding:7px;border-radius:7px;display:flex;gap:6px;flex-wrap:wrap;" onsubmit="return confirm('এই Employee-এর Website login password reset করবেন?')"><input type="password" name="newPassword" minlength="6" placeholder="New Website Password" required style="flex:1;min-width:180px;padding:7px;border:1px solid #ddd;border-radius:6px;"><button class="btn" type="submit" style="padding:5px 9px;background:#6f42c1">🔑 Reset Login Password</button></form></details>`).join('')||'<div style="color:#777;font-size:12px;margin-top:6px">কোনো employee নেই।</div>'}</div></div></details><hr style="margin:20px 0;">` : ''}<hr style="margin:20px 0;"> <style>
 body.staff-restricted-dashboard{padding:0!important;background:#f4f4f4} body.staff-restricted-dashboard .container{max-width:1200px;margin:0 auto;padding:14px 10px 30px} body.staff-restricted-dashboard .admin-section-launcher{margin-top:0} body.staff-restricted-dashboard .admin-section-box:not([data-section-key]){display:none!important} body.staff-restricted-dashboard .admin-section-box.staff-hidden{display:none!important} body.staff-restricted-dashboard .staff-only-title{display:block!important;background:#eef7ff;border:1px solid #cfe8ff;border-radius:10px;padding:10px;margin-bottom:12px;font-size:13px} .admin-section-launcher{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;margin:16px 0 20px}
 .admin-launch-box{appearance:none;border:1px solid #e2e7ee;background:linear-gradient(145deg,#fff,#f7f9fc);border-radius:14px;padding:14px 12px;text-align:left;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.05);transition:.18s;min-height:94px}
 .admin-launch-box:hover{transform:translateY(-2px);box-shadow:0 7px 18px rgba(0,0,0,.09);border-color:#f85606}
@@ -2490,7 +2464,21 @@ ${(() => {
 ${productRequestRows.map(r=>{ const statusLabel=r.status==='accepted'?`Accepted by ${r.acceptedByEmail||'Admin'}`:r.status; return `<div style="background:#fff;border:1px solid #eee;border-radius:8px;padding:10px;margin:8px 0;"><div style="display:flex;gap:10px;align-items:flex-start;">${r.requestImage?`<img src="${mediaUrl(r.requestImage)}" width="70" height="70" style="object-fit:cover;border-radius:6px;cursor:pointer;" onclick="openImageModal(this.src)">`:''}<div style="flex:1;"><b>${r.productName}</b><br><span style="font-size:12px;">Customer: ${r.userName} | ${r.userPhone}</span><br><span style="font-size:12px;">Address: ${r.userAddress}</span><br><span style="font-size:12px;">${r.details||''}</span><br><span style="font-size:12px;color:#007bff;">Status: ${statusLabel}</span>${r.status!=='accepted' && r.status!=='closed' ? `<form action="/staff/product-request/forward/${r._id}" method="POST" style="margin-top:7px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:5px;">কোন Admin-কে পাঠাবেন?</label><div style="max-height:120px;overflow:auto;border:1px solid #ddd;padding:6px;border-radius:6px;background:#fafafa;"><label style="display:block;font-size:12px;margin-bottom:5px;font-weight:700;"><input type="checkbox" name="broadcastAll" value="1" onchange="toggleStaffRequestAdmins(this, '${r._id}')"> সব Active Admin-কে পাঠান</label>${activeSubAdmins.map(sa=>`<label style="display:block;font-size:12px;"><input type="checkbox" name="subAdminIds" value="${sa._id}" class="staffRequestAdmin-${r._id}"> ${sa.name||sa.email} — ${sa.email}</label>`).join('')}</div><button class="btn" style="margin-top:6px;padding:7px 12px;background:#007bff;">📨 Send to Selected Admin(s)</button></form>` : `<div style="margin-top:7px;color:#666;font-size:12px;">এই request ইতিমধ্যে একজন Admin গ্রহণ করেছেন।</div>`}</div></div></div>`;}).join('') || '<p style="color:#777;">আপনার assigned Product Request queue-তে কোনো নতুন request নেই।</p>'}
 `}
 </div>
-<div style="margin-top:14px;"><details class="admin-section-box" id="productsBox" data-section-key="products"><summary>📋 All Products List</summary><div class="admin-section-body"><h3 id="productsSec">All Products List</h3> ${!isMainAdmin(req.user) ? `<div style="background:#eef7ff;border:1px solid #cfe8ff;border-radius:8px;padding:8px;font-size:12px;color:#245b7a;margin-bottom:8px;">🔒 এখানে শুধু আপনার own owner ID-এর Product দেখানো হয়। অন্য Seller-এর Product এই তালিকায় দেখানো হবে না।</div>` : `<div style="background:#f8f9fa;border:1px solid #e5e7eb;border-radius:8px;padding:8px;font-size:12px;color:#666;margin-bottom:8px;">🔐 Main Admin সব Seller-এর Product management view করতে পারবেন; Seller Admin/Employee শুধু নিজের owner ID-এর Product দেখবে।</div>`} <div style="max-height:400px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px;"> ${productsHTML.length ? productsHTML : '<p style="color:#777;">No products found.</p>'} </div></div></details></div></div> </div> <script>
+<div style="margin-top:14px;"><details class="admin-section-box" id="productsBox" data-section-key="products"><summary>📋 All Products List</summary><div class="admin-section-body"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;"><a href="/admin-dashboard" class="btn" style="display:inline-flex;align-items:center;gap:5px;padding:7px 12px;text-decoration:none;background:#f85606;color:#fff;border-radius:7px;font-weight:700;">← Back</a><h3 id="productsSec" style="margin:0;">All Products List</h3></div> ${!isMainAdmin(req.user) ? `<div style="background:#eef7ff;border:1px solid #cfe8ff;border-radius:8px;padding:8px;font-size:12px;color:#245b7a;margin-bottom:8px;">🔒 এখানে শুধু আপনার own owner ID-এর Product দেখানো হয়। অন্য Seller-এর Product এই তালিকায় দেখানো হবে না।</div>` : `<div style="background:#f8f9fa;border:1px solid #e5e7eb;border-radius:8px;padding:8px;font-size:12px;color:#666;margin-bottom:8px;">🔐 Main Admin সব Seller-এর Product management view করতে পারবেন; Seller Admin/Employee শুধু নিজের owner ID-এর Product দেখবে।</div>`} <div style="max-height:400px; overflow-y:auto; background:#f9f9f9; padding:10px; border-radius:6px;"> ${productsHTML.length ? productsHTML : '<p style="color:#777;">No products found.</p>'} </div></div></details></div></div> </div> <script>
+async function copyStoreLink(storeId, btn) {
+  const el=document.getElementById('storeLink-'+String(storeId));
+  const text=el ? el.value : '';
+  if(!text) return;
+  try {
+    if(navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
+    else { el.focus(); el.select(); document.execCommand('copy'); }
+    const old=btn ? btn.textContent : '📋 Copy Link';
+    if(btn){ btn.textContent='✅ Copied'; setTimeout(()=>btn.textContent=old,1200); }
+  } catch(e) {
+    if(el){ el.focus(); el.select(); document.execCommand('copy'); }
+    alert('Store Link কপি হয়েছে।');
+  }
+}
 const facebookProductData = ${JSON.stringify(products.map(p => ({ id:String(p._id), name:p.name, price:p.price, stock:p.stock, category:p.category, description:p.description||'', image:mediaUrl(p.mainImage), url:`${SITE_URL_FALLBACK}/product/${p._id}` })))};
 function selectFacebookProduct(id) {
 const p=facebookProductData.find(x=>x.id===String(id));
@@ -3174,7 +3162,7 @@ if (req.body.productId) {
 product = await Product.findById(req.body.productId).lean();
 if (!product) return res.status(400).send('Selected product not found.');
 if (!productBelongsToUser(product, req.user)) return res.status(403).send('Unauthorized: Main Admin access required');
-productLink = `${SITE_URL_FALLBACK}/product/${product._id}?source=facebook`;
+productLink = `${SITE_URL_FALLBACK}/product/${product._id}`;
 }
 
 const title = String(req.body.title || '').trim();
